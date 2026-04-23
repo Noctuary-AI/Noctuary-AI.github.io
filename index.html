@@ -16,7 +16,7 @@
 --bdr:#2a2436;--bdr2:#332d42;--code:rgba(0,0,0,.35);--usr:#1a1624;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Crimson Pro',Georgia,serif;background:var(--bg-deep);color:var(--tx);height:100vh;overflow:hidden;font-size:18px}
+body{font-family:'Crimson Pro',Georgia,serif;background:var(--bg-deep);color:var(--tx);height:100vh;height:100dvh;overflow:hidden;font-size:18px}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}
 button{font-family:inherit;cursor:pointer}
 textarea::placeholder{color:var(--tx-m);opacity:.5}
@@ -124,19 +124,39 @@ textarea::placeholder{color:var(--tx-m);opacity:.5}
 
 /* RESPONSIVE */
 @media(max-width:700px){
-.sb{position:fixed;left:0;top:0;height:100vh;z-index:100;width:270px;min-width:270px;transform:translateX(-100%);transition:transform .3s ease;box-shadow:4px 0 20px rgba(0,0,0,.5)}
+html,body{height:100%;overflow:hidden;position:fixed;width:100%}
+#app{height:100dvh;height:-webkit-fill-available}
+.sb{position:fixed;left:0;top:0;height:100%;z-index:200;width:275px;min-width:275px;transform:translateX(-100%);transition:transform .3s ease;box-shadow:4px 0 24px rgba(0,0,0,.6)}
 .sb.mob-open{transform:translateX(0)}
 .sb.shut{transform:translateX(-100%)}
-.msg-wrap,.input-row,.file-tag{padding-left:14px;padding-right:14px}
-.about{padding:30px 18px 60px}
-.about .masters{grid-template-columns:1fr}
-.about h1{font-size:30px}
-.topbar{padding:11px 14px}
+.mob-backdrop{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:150;-webkit-tap-highlight-color:transparent}
+.mob-backdrop.show{display:block}
+.main{height:100dvh;height:-webkit-fill-available}
+.msgs{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.input-area{padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom));border-top:1px solid var(--bdr);flex-shrink:0}
+.input-row{gap:8px}
+.input-foot{font-size:9px;margin-top:5px}
+.send-btn{padding:10px 14px;font-size:12px}
+.file-btn{padding:10px;font-size:14px}
+.input-row textarea{font-size:16px;padding:10px 14px}
+.msg-wrap{padding:12px 14px}
+.msg-body{font-size:16px}
+.msg-av{width:30px;height:30px;font-size:13px}
+.msg-row{gap:10px}
+.topbar{padding:10px 14px}
+.tb-mode{font-size:14px}
 .tb-desc{display:none}
 .w-title{font-size:26px;letter-spacing:2px}
-.w-desc{font-size:14px}
-.w-prompts{gap:6px}
-.w-p{font-size:12px;padding:7px 12px}
+.w-sub{font-size:14px}
+.w-desc{font-size:14px;padding:0 10px}
+.w-prompts{gap:6px;padding:0 10px}
+.w-p{font-size:13px;padding:8px 12px}
+.w-icon{font-size:44px;margin-bottom:14px}
+.about{padding:30px 18px 60px}
+.about .masters{grid-template-columns:1fr}
+.about h1{font-size:28px;letter-spacing:2px}
+.about p{font-size:15px}
+.file-tag{font-size:11px;padding:4px 14px}
 }
 </style>
 </head>
@@ -144,6 +164,7 @@ textarea::placeholder{color:var(--tx-m);opacity:.5}
 
 <!-- ========== APP PAGE ========== -->
 <div id="app">
+  <div class="mob-backdrop" id="mob-backdrop" onclick="closeSidebarMobile()"></div>
   <div class="sb" id="sidebar">
     <div class="sb-head">
       <div class="logo-r"><span class="logo-i">📖</span><span class="logo-t">NOCTUARY</span></div>
@@ -396,9 +417,12 @@ function updatePlaceholder() {
 
 function toggleSidebar() {
   const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('mob-backdrop');
   const isMobile = window.innerWidth <= 700;
   if (isMobile) {
+    const opening = !sb.classList.contains('mob-open');
     sb.classList.toggle('mob-open');
+    if (opening) { bd.classList.add('show'); } else { bd.classList.remove('show'); }
   } else {
     sidebarOpen = !sidebarOpen;
     sb.classList.toggle('shut');
@@ -406,9 +430,8 @@ function toggleSidebar() {
 }
 
 function closeSidebarMobile() {
-  if (window.innerWidth <= 700) {
-    document.getElementById('sidebar').classList.remove('mob-open');
-  }
+  document.getElementById('sidebar').classList.remove('mob-open');
+  document.getElementById('mob-backdrop').classList.remove('show');
 }
 
 function showAbout() {
