@@ -920,15 +920,23 @@ async function send() {
 
 async function typewriter(text, msgIndex) {
   const el = document.getElementById('msgs');
-  const speed = 12; // ms per character
-  const chunkSize = 3; // characters per tick for faster feel
+  const speed = 12;
+  const chunkSize = 3;
   let i = 0;
+  let userScrolledUp = false;
+
+  // Detect if user scrolls up during typing
+  function onScroll() {
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUp = distFromBottom > 80;
+  }
+  el.addEventListener('scroll', onScroll);
+
   return new Promise(resolve => {
     function tick() {
       if (i < text.length) {
         i = Math.min(i + chunkSize, text.length);
         messages[msgIndex].content = text.slice(0, i);
-        // Only update the last message div, not full re-render
         const msgDivs = el.querySelectorAll('.msg-wrap');
         const lastMsg = msgDivs[msgDivs.length - 1];
         if (lastMsg) {
@@ -937,10 +945,13 @@ async function typewriter(text, msgIndex) {
             bodyEl.innerHTML = '<div class="msg-who ai-n">' + MODES.find(x=>x.id===mode).label + '</div>' + renderMd(messages[msgIndex].content);
           }
         }
-        el.scrollTop = el.scrollHeight;
+        if (!userScrolledUp) {
+          el.scrollTop = el.scrollHeight;
+        }
         setTimeout(tick, speed);
       } else {
         messages[msgIndex].content = text;
+        el.removeEventListener('scroll', onScroll);
         renderMessages();
         resolve();
       }
