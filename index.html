@@ -39,7 +39,7 @@ textarea::placeholder{color:var(--tx-m);opacity:.5}
 
 /* BOOKSHELF - bottom left castle study */
 .bookshelf{position:fixed;bottom:105px;left:280px;z-index:2;pointer-events:none;opacity:.9}
-@media(max-width:700px){.bookshelf{display:none}}
+@media(max-width:700px){.bookshelf{display:none}.candle-set{display:none}}
 
 /* CANDLE ON ORNATE TABLE */
 .candle-set{position:fixed;bottom:112px;right:35px;z-index:2;pointer-events:none;opacity:.9}
@@ -256,13 +256,14 @@ html,body{height:100%;overflow:hidden;position:fixed;width:100%}
 .send-btn{padding:10px 14px;font-size:12px}
 .file-btn{padding:10px;font-size:14px}
 .input-row textarea{font-size:16px;padding:10px 14px}
-.msg-wrap{padding:12px 14px}
-.msg-body{font-size:15px!important;line-height:1.65}
+.msg-wrap{padding:10px 8px 10px 4px}
+.msg-body{font-size:15px!important;line-height:1.65;word-wrap:break-word;overflow-wrap:break-word}
 .msg-body p,.msg-body li,.msg-body blockquote{font-size:15px!important}
 .msg-body h1{font-size:17px!important}.msg-body h2{font-size:16px!important}.msg-body h3{font-size:15px!important}
-.msg-body pre,.msg-body code{font-size:12px!important}
+.msg-body pre,.msg-body code{font-size:12px!important;white-space:pre-wrap;word-break:break-all}
 .msg-who{font-size:9px!important}
-.msg-av{width:28px;height:28px;font-size:12px}
+.msg-av{width:24px;height:24px;font-size:11px}
+.msg-row{gap:6px}
 .msg-row{gap:10px}
 .topbar{padding:10px 14px}
 .tb-mode{font-size:14px}
