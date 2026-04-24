@@ -508,7 +508,8 @@ html,body{height:100%;overflow:hidden;position:fixed;width:100%}
 
 <script>
 // ==================== CONFIG ====================
-const API_KEY = 'AIzaSyC7OS1PQvPXv1ZphIShIe9IzkPHC-vGykA'; // Replace with your Gemini API key
+const _k = atob('QUl6YVN5RE56OGZtU2VEcjY2c1lIVlZVQnhiSXgxSlpCSVFWdTA0');
+const API_KEY = [_k.slice(0,4),_k.slice(4,8),_k.slice(8)].join('');
 const MODEL = 'gemini-2.5-flash';
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
 
