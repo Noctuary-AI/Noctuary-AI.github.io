@@ -6,6 +6,24 @@
 <title>NOCTUARY — The Literature-First AI</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<!-- File parsers: pdf.js for PDFs, mammoth for Word docs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.2/mammoth.browser.min.js"></script>
+<script>
+  // Configure pdf.js worker once it loads
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+  }
+</script>
+<!-- File parsers: pdf.js for PDFs, mammoth for Word docs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs" type="module"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.2/mammoth.browser.min.js"></script>
+<script type="module">
+  // Configure pdf.js worker
+  import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+  window.pdfjsLib = pdfjsLib;
+</script>
 <style>
 :root{
 --bg-deep:#0c0a10;--bg:#110f16;--bg-s:#16131e;--bg-t:#1e1a28;--bg-h:#252132;
@@ -1407,24 +1425,86 @@ function clearChat() {
 }
 
 // ==================== FILE HANDLING ====================
-function handleFile(e) {
+async function handleFile(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(ev) {
-    uploadedFile = { name: file.name, content: ev.target.result };
-    document.getElementById('file-tag-area').innerHTML = `
-      <div class="file-tag">📎 ${file.name} (${(file.size/1024).toFixed(1)}KB)
+  e.target.value = '';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  const tagArea = document.getElementById('file-tag-area');
+
+  // Show parsing-in-progress chip immediately
+  tagArea.innerHTML = `<div class="file-tag">📎 Reading ${file.name}…</div>`;
+
+  try {
+    let text = '';
+
+    if (ext === 'txt' || ext === 'md') {
+      text = await file.text();
+    }
+    else if (ext === 'docx') {
+      if (typeof mammoth === 'undefined') throw new Error('Document parser failed to load. Refresh the page and try again.');
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      text = result.value;
+    }
+    else if (ext === 'pdf') {
+      if (typeof pdfjsLib === 'undefined') throw new Error('PDF parser failed to load. Refresh the page and try again.');
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        // Update chip with progress for long PDFs
+        tagArea.innerHTML = `<div class="file-tag">📎 Reading ${file.name}… page ${i} of ${pdf.numPages}</div>`;
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(item => item.str).join(' ');
+        pages.push(pageText);
+      }
+      text = pages.join('\n\n');
+      if (text.trim().length < 100) {
+        throw new Error('This PDF appears to be scanned/image-based — no extractable text. Try a .docx version or convert to .txt first.');
+      }
+    }
+    else if (ext === 'doc') {
+      throw new Error('Old Word format (.doc) is not supported in-browser. Please save your document as .docx and try again.');
+    }
+    else {
+      throw new Error(`Unsupported file type: .${ext}. Try .txt, .md, .docx, or .pdf instead.`);
+    }
+
+    // Clean up extracted text
+    text = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    if (!text) {
+      throw new Error('No readable text found in this file.');
+    }
+
+    // Calculate word count for user feedback
+    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+    const sizeKB = (file.size / 1024).toFixed(0);
+
+    uploadedFile = { name: file.name, content: text, wordCount };
+
+    tagArea.innerHTML = `
+      <div class="file-tag">📎 ${file.name} · ${sizeKB}KB · ${wordCount.toLocaleString()} words
         <button onclick="removeFile()">✕</button>
       </div>`;
-  };
-  reader.readAsText(file);
-  e.target.value = '';
+    updateSendBtn();
+  } catch (err) {
+    uploadedFile = null;
+    tagArea.innerHTML = `
+      <div class="file-tag" style="color:#e88;border-color:rgba(232,136,136,.3)">
+        ⚠️ ${err.message}
+        <button onclick="removeFile()">✕</button>
+      </div>`;
+  }
 }
 
 function removeFile() {
   uploadedFile = null;
   document.getElementById('file-tag-area').innerHTML = '';
+  updateSendBtn();
 }
 
 // ==================== RENDERING ====================
@@ -1578,7 +1658,7 @@ async function send() {
     if (data.candidates && data.candidates[0] && data.candidates[0].content) {
       reply = data.candidates[0].content.parts.map(p => p.text || '').join('');
     } else if (data.error) {
-      reply = `⚠️ API Error: ${data.error.message || 'Unknown error'}. Make sure your API key is set correctly.`;
+      reply = themedError(data.error, mode);
     }
     messages.push({ role: 'assistant', content: '' });
     loading = false;
@@ -1586,10 +1666,80 @@ async function send() {
     // Typewriter effect
     await typewriter(reply, messages.length - 1);
   } catch (err) {
-    messages.push({ role: 'assistant', content: `⚠️ Connection error: ${err.message}. Check your API key and try again.` });
+    messages.push({ role: 'assistant', content: themedError({ message: err.message, code: 'NETWORK' }, mode) });
     loading = false;
     renderMessages();
   }
+}
+
+// ==================== THEMED ERRORS ====================
+// Each personality delivers errors in their own voice. Detects error type
+// from the API response and selects an appropriate framing.
+function themedError(error, currentMode) {
+  const msg = (error.message || '').toLowerCase();
+  const code = error.code || '';
+
+  // Classify the error
+  let kind = 'unknown';
+  if (msg.includes('quota') || msg.includes('rate') || msg.includes('limit') || code === 429) kind = 'quota';
+  else if (msg.includes('api key') || msg.includes('api_key') || msg.includes('unauthorized') || code === 401 || code === 403) kind = 'auth';
+  else if (msg.includes('safety') || msg.includes('blocked') || msg.includes('harm')) kind = 'safety';
+  else if (msg.includes('network') || msg.includes('fetch') || msg.includes('connection') || code === 'NETWORK') kind = 'network';
+  else if (msg.includes('token') || msg.includes('too long') || msg.includes('context')) kind = 'too_long';
+
+  // Extract retry seconds if present (e.g., "Please retry in 47.84s")
+  let retryHint = '';
+  const retryMatch = msg.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+  if (retryMatch) {
+    const secs = Math.ceil(parseFloat(retryMatch[1]));
+    retryHint = secs < 60 ? `${secs} seconds` : `about ${Math.ceil(secs/60)} minute${secs >= 120 ? 's' : ''}`;
+  }
+
+  const errors = {
+    sage: {
+      quota: `*sets down the teacup*\n\nThe well has run dry for the moment, my friend. We have spoken much, and the keeper of the gate asks that we wait${retryHint ? ` — about ${retryHint}` : ' a short while'} before resuming. Use this pause well. Read the page back to yourself aloud. The ear catches what the eye has grown accustomed to.`,
+      auth: `*peers over reading glasses*\n\nThe key to this library appears to have been misplaced or refused at the door. Have a word with whoever set up your access — the credentials need attention before we can continue our conversation.`,
+      safety: `*pauses thoughtfully*\n\nThe gatekeeper of this particular system has declined to engage with the passage as written. Not a judgment from me — merely the automated guardian's caution. Try rephrasing, or approach the same idea from a different angle. The good masters often wrote difficult things by sidling up to them.`,
+      network: `*looks toward the window*\n\nThe connection between us has gone quiet. Check your internet, perhaps, and we shall pick up where we left off. The thought you brought won't be lost — only delayed.`,
+      too_long: `*considers the manuscript pile*\n\nWhat you've sent is more than I can hold in mind at once. Perhaps we work in pieces — a chapter, a scene, a passage — rather than the whole work in a single breath. The masters revised in passes. So shall we.`,
+      unknown: `*frowns slightly*\n\nSomething has gone awry in the machinery — the message I received is unclear: *"${error.message || 'no detail given'}"*. Wait a moment and try again. If it persists, the technical sort of help will know more than I.`
+    },
+    redquill: {
+      quota: `Halt.\n\nThe quota is spent${retryHint ? ` — wait ${retryHint}` : ' — wait briefly'} before we continue. Use the silence. Read your last paragraph aloud. Find one weak verb and replace it. That is the assignment until the gate reopens.`,
+      auth: `The API key is rejected. Whoever set up access — fix it. I cannot work without tools.`,
+      safety: `The safety filter intercepted this. Not my call. Rephrase the passage and submit again. Many hard truths have been written by those willing to angle the language.`,
+      network: `Connection lost. Check the network. Resend when restored. I do not repeat myself unprompted.`,
+      too_long: `Too much. Send a chapter, not the manuscript. Or a scene, not the chapter. Editing is local work — show me the wound, not the entire body.`,
+      unknown: `Something failed: *"${error.message || 'unspecified'}"*. Retry. If it continues, the problem is not yours to solve from this side of the screen.`
+    },
+    muse: {
+      quota: `Oh — oh no, the well's gone dry for a moment.\n\nThe gatekeeper says wait${retryHint ? ` — ${retryHint}` : ' — a moment'} before we can keep building. But this is the *good* kind of pause. Walk away from the page. Look out a window. The best ideas arrive when you stop chasing them. Come back when the gate opens — I'll still be electric.`,
+      auth: `The door's locked, friend! Whoever holds the key needs to fix the credentials before we can keep going. Boring problem, easily solved.`,
+      safety: `Ohhh — the safety filter caught that one. Not a problem with the *idea* — just the wording. Try it sideways. The best stories often live in what you can imply rather than say outright. What's the version of this scene that sneaks in through the back door?`,
+      network: `The line went quiet. Check the connection — and while you wait, scribble down whatever you were about to ask me. Sometimes the question is the answer.`,
+      too_long: `Wait — you sent me everything? Everything everything? I love the energy but I'm drowning a little. Pick the one scene that's haunting you. Start there. We'll spiral outward.`,
+      unknown: `Something glitched: *"${error.message || 'mystery error'}"*. Try again — most things in writing work the second time anyway.`
+    },
+    architect: {
+      quota: `Quota exceeded. The free tier permits 250,000 input tokens per minute and we have surpassed that ceiling.${retryHint ? ` Retry window: ${retryHint}.` : ''} Two structural fixes worth your consideration: enable billing on your API key (paid tier raises the per-minute limit roughly 16x), or upload manuscripts as smaller units — chapter-sized rather than book-sized — to stay within the free allowance.`,
+      auth: `Authentication failed. The API key is either missing, invalid, or lacks permission for this model. Verify the key in your Google AI Studio dashboard.`,
+      safety: `The safety classifier flagged this content. I cannot override that filter. Reframe the request — same load-bearing intent, different surface language — and resubmit.`,
+      network: `Network connection failure. Check your internet. The request did not reach the server, so no work has been lost.`,
+      too_long: `Input exceeds the model's context capacity. Architecturally, this means the manuscript and conversation history together occupy more space than a single request can carry. Send a smaller unit — one chapter, one act — and we work from there.`,
+      unknown: `Unhandled error: *"${error.message || 'no detail provided'}"*. Capture the exact wording if it recurs. Diagnostic precision saves time on the second pass.`
+    },
+    lorekeeper: {
+      quota: `*closes the tome carefully*\n\nThe wells of speaking have run dry for the moment. The gatekeepers of this place permit only so many words to pass through their gate within a turning of the glass${retryHint ? `, and they ask that we wait ${retryHint} before opening it again` : ''}. Sit with your world a while. Often the silence between questions is where the deeper answers lie.`,
+      auth: `*looks up from the page*\n\nThe sigil that grants you passage has been refused. Whoever holds the key to this archive must restore your access before we may continue our work.`,
+      safety: `*pauses*\n\nThe wards placed upon this place have turned that particular request aside. Not by my will — by the silent guardians' caution. Frame the question with different words and the way may open.`,
+      network: `*the candle gutters*\n\nThe path between us has darkened. Restore your connection and the page will await you, unchanged. The world you are building does not vanish because the lights flickered.`,
+      too_long: `*regards the great pile of pages*\n\nWhat you have brought is a kingdom entire, and even my archive has its limits. Bring me a single province — one continent, one culture, one chapter — and we shall do that justice before reaching for the whole.`,
+      unknown: `*frowns at the air*\n\nA disturbance: *"${error.message || 'the message comes garbled'}"*. The fault lies not in your asking. Try again, and if the silence persists, the keepers of the machinery must be summoned.`
+    }
+  };
+
+  const personality = errors[currentMode] || errors.sage;
+  return personality[kind] || personality.unknown;
 }
 
 async function typewriter(text, msgIndex) {
