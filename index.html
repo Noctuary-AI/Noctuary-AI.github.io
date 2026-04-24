@@ -6,96 +6,293 @@
 <title>NOCTUARY — The Literature-First AI</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
-
+<script>
+(function(){
+  function loadScript(urls, name) {
+    return new Promise((resolve, reject) => {
+      let i = 0;
+      function tryNext() {
+        if (i >= urls.length) return reject(`Failed to load ${name}`);
+        const s = document.createElement('script');
+        s.src = urls[i++];
+        s.onload = resolve;
+        s.onerror = tryNext;
+        document.head.appendChild(s);
+      }
+      tryNext();
+    });
+  }
+  const pdfUrls = ["https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js","https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js","https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"];
+  const mamUrls = ["https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js","https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js","https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"];
+  const markUrls = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js","https://unpkg.com/marked/marked.min.js","https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"];
+  Promise.all([loadScript(pdfUrls, 'pdfjs'), loadScript(mamUrls, 'mammoth'), loadScript(markUrls, 'marked')])
+    .then(() => { console.log("Parsers Ready."); pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.worker.min.js'; })
+    .catch(e => console.error(e));
+})();
+</script>
 <style>
-/* [RE-INSERTED ALL YOUR ORIGINAL CSS VARIABLES AND ATMOSPHERE STYLES] */
-:root{
---bg-deep:#0c0a10;--bg:#110f16;--bg-s:#16131e;--bg-t:#1e1a28;--bg-h:#252132;
---tx:#e0dce8;--tx-m:#8b84a0;--tx-d:#5c5572;--hd:#f0ecf6;
---ac:#c9a0ff;--ac2:#d4b3ff;--acg:#d4a853;--acg2:#e8c06a;
---ac-h:#dfc5ff;--ac-dim:rgba(201,160,255,.1);--ac-bdr:rgba(201,160,255,.25);
---acg-dim:rgba(212,168,83,.12);--acg-bdr:rgba(212,168,83,.3);
---bdr:#2a2436;--bdr2:#332d42;--code:rgba(0,0,0,.35);--usr:#1a1624;
-}
-/* ... all your atmosphere, cobweb, candle, and personality CSS goes here ... */
+:root{--bg-deep:#0c0a10;--bg:#110f16;--bg-s:#16131e;--bg-t:#1e1a28;--bg-h:#252132;--tx:#e0dce8;--tx-m:#8b84a0;--tx-d:#5c5572;--hd:#f0ecf6;--ac:#c9a0ff;--ac2:#d4b3ff;--acg:#d4a853;--acg2:#e8c06a;--ac-h:#dfc5ff;--ac-dim:rgba(201,160,255,.1);--ac-bdr:rgba(201,160,255,.25);--acg-dim:rgba(212,168,83,.12);--acg-bdr:rgba(212,168,83,.3);--bdr:#2a2436;--bdr2:#332d42;--code:rgba(0,0,0,.35);--usr:#1a1624}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg-deep);color:var(--tx);font-family:'Crimson Pro',serif;line-height:1.6;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;position:relative}
+body::before{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 50% 50%,transparent 0,rgba(12,10,16,.4) 100%),url("https://www.transparenttextures.com/patterns/dark-matter.png");pointer-events:none;z-index:0;opacity:.5}
+.cobweb{position:absolute;pointer-events:none;opacity:.15;z-index:1;filter:contrast(1.2) brightness(.8)}
+.cob-tl{top:0;left:0;width:300px;height:300px}
+.cob-tr{top:0;right:0;width:250px;height:250px;transform:scaleX(-1)}
+header{position:relative;z-index:10;padding:1.25rem 2rem;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(to bottom,var(--bg-deep),transparent);border-bottom:1px solid var(--bdr)}
+.logo-wrap{display:flex;align-items:center;gap:1rem}
+.logo{font-family:'Cinzel',serif;font-weight:900;font-size:1.4rem;letter-spacing:5px;color:var(--ac);text-shadow:0 0 20px var(--ac-dim)}
+.logo span{color:var(--acg)}
+.sys-status{font-family:'JetBrains Mono',monospace;font-size:.65rem;text-transform:uppercase;letter-spacing:2px;color:var(--tx-d);display:flex;align-items:center;gap:8px}
+.status-dot{width:4px;height:4px;background:var(--acg);border-radius:50%;box-shadow:0 0 8px var(--acg)}
+#main-layout{flex:1;display:flex;overflow:hidden;position:relative;z-index:1}
+#msgs{flex:1;overflow-y:auto;padding:2.5rem 15%;display:flex;flex-direction:column;gap:3rem;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent}
+#msgs::-webkit-scrollbar{width:5px}
+#msgs::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:10px}
+.msg-wrap{width:100%;max-width:850px;margin:0 auto;position:relative;animation:msgIn .6s cubic-bezier(.16,1,.3,1)}
+@keyframes msgIn{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
+.msg-who{font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-bottom:1rem;display:flex;align-items:center;gap:12px}
+.msg-who::after{content:"";height:1px;flex:1;background:linear-gradient(to right,var(--bdr2),transparent)}
+.ai-n{color:var(--ac)}
+.usr-n{color:var(--acg)}
+.msg-body{font-size:1.18rem;font-weight:300;color:var(--tx);white-space:pre-wrap;letter-spacing:.01em}
+.msg-body p{margin-bottom:1.2rem}
+.msg-body p:last-child{margin-bottom:0}
+.msg-body code{font-family:'JetBrains Mono',monospace;font-size:.9rem;background:var(--code);padding:.2rem .4rem;border-radius:3px;color:var(--ac2)}
+.msg-body pre{background:var(--code);padding:1.2rem;border-radius:6px;overflow-x:auto;margin:1.5rem 0;border:1px solid var(--bdr)}
+.file-tag{display:inline-flex;align-items:center;gap:8px;background:var(--acg-dim);border:1px solid var(--acg-bdr);color:var(--acg);padding:.4rem .8rem;font-family:'JetBrains Mono',monospace;font-size:.7rem;margin-top:1rem;border-radius:3px;text-transform:uppercase;letter-spacing:1px}
+footer{position:relative;z-index:10;padding:1.5rem 15% 2.5rem;background:linear-gradient(to top,var(--bg-deep) 40%,transparent)}
+.input-stage{max-width:850px;margin:0 auto;position:relative}
+.text-area-wrap{position:relative;background:var(--bg-s);border:1px solid var(--bdr2);border-radius:8px;transition:all .4s cubic-bezier(.16,1,.3,1);box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.text-area-wrap:focus-within{border-color:var(--ac-bdr);box-shadow:0 0 0 1px var(--ac-bdr),0 15px 40px rgba(0,0,0,.4)}
+textarea{width:100%;background:transparent;border:none;color:var(--tx);padding:1.2rem 1.5rem;font-family:'Crimson Pro',serif;font-size:1.15rem;resize:none;outline:none;min-height:80px;max-height:300px;scrollbar-width:none}
+.controls{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1.2rem;border-top:1px solid var(--bdr)}
+.modes-bar{display:flex;gap:1.5rem}
+.mode-opt{background:none;border:none;color:var(--tx-d);font-family:'Cinzel',serif;font-size:.65rem;font-weight:700;letter-spacing:2px;cursor:pointer;transition:all .3s;padding-bottom:4px;border-bottom:1px solid transparent;text-transform:uppercase}
+.mode-opt:hover{color:var(--tx-m)}
+.mode-opt.active{color:var(--ac);border-bottom-color:var(--ac)}
+.action-btns{display:flex;gap:1rem;align-items:center}
+.icon-btn{background:none;border:none;color:var(--tx-d);cursor:pointer;display:flex;align-items:center;transition:all .3s}
+.icon-btn:hover{color:var(--ac2)}
+.send-btn{background:var(--ac-dim);border:1px solid var(--ac-bdr);color:var(--ac);font-family:'Cinzel',serif;font-size:.7rem;font-weight:800;letter-spacing:2px;padding:.5rem 1.5rem;border-radius:4px;cursor:pointer;transition:all .3s;text-transform:uppercase}
+.send-btn:hover:not(:disabled){background:var(--ac);color:var(--bg-deep)}
+.send-btn:disabled{opacity:.3;cursor:not-allowed}
+.candle-area{position:absolute;bottom:40px;right:40px;display:flex;flex-direction:column;align-items:center;pointer-events:none;z-index:1;opacity:.6}
+.flame{width:12px;height:25px;background:#ff9d00;border-radius:50% 50% 20% 20%;filter:blur(2px);animation:flicker 1.5s infinite alternate;box-shadow:0 0 20px #ff5e00}
+.candle-body{width:20px;height:60px;background:#d4c8b5;border-radius:2px;margin-top:-5px}
+@keyframes flicker{0%{transform:scale(1) rotate(-1deg);opacity:.8}100%{transform:scale(1.1) rotate(1deg);opacity:1}}
 </style>
-
 </head>
-<body class="theme-sage">
-    <script>
-/* --- THE CRITICAL FIXES WITHIN YOUR ORIGINAL SCRIPT --- */
+<body class="theme-noctuary">
+<svg class="cobweb cob-tl" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0,0 L100,0 M0,0 L0,100 M0,0 L70,30 M0,0 L30,70 M20,0 Q25,25 0,20 M40,0 Q45,45 0,40 M60,0 Q65,65 0,60 M80,0 Q85,85 0,80" stroke="white" stroke-width="0.2" fill="none"/></svg>
+<svg class="cobweb cob-tr" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0,0 L100,0 M0,0 L0,100 M0,0 L70,30 M0,0 L30,70 M20,0 Q25,25 0,20 M40,0 Q45,45 0,40 M60,0 Q65,65 0,60 M80,0 Q85,85 0,80" stroke="white" stroke-width="0.2" fill="none"/></svg>
+<header>
+  <div class="logo-wrap">
+    <div class="logo">NOCT<span>UARY</span></div>
+  </div>
+  <div class="sys-status">
+    <div class="status-dot"></div>
+    <span id="stat-text">Ready for Manuscript</span>
+  </div>
+</header>
+<main id="main-layout">
+  <div id="msgs"></div>
+  <div class="candle-area">
+    <div class="flame"></div>
+    <div class="candle-body"></div>
+  </div>
+</main>
+<footer>
+  <div class="input-stage">
+    <div class="text-area-wrap">
+      <textarea id="prompt" placeholder="Invoke the ink..." rows="1"></textarea>
+      <div class="controls">
+        <div class="modes-bar" id="modes"></div>
+        <div class="action-btns">
+          <input type="file" id="f-in" style="display:none" accept=".txt,.pdf,.docx">
+          <button class="icon-btn" onclick="document.getElementById('f-in').click()" title="Attach Scroll">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button id="send-btn" class="send-btn" onclick="handleSend()">Consult</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+<script>
+const API_KEY = "YOUR_API_KEY"; // REPLACE THIS
+const MODES = [
+  {id:'noctuary', label:'Noctuary', sage:"You are Noctuary. You treat literature as a sacred ritual. Speak with elegance, gravity, and poetic depth."},
+  {id:'sage', label:'Sage', sage:"You are the Sage. Your goal is structural and thematic mastery. Analyze prose with surgical, academic precision."},
+  {id:'muse', label:'Muse', sage:"You are the Muse. Be ethereal and inspiring. Help the scribe find the 'soul' of their characters and world."},
+  {id:'lexicon', label:'Lexicon', sage:"You are Lexicon. Focus exclusively on vocabulary, rhythm, and linguistic texture."},
+  {id:'redquill', label:'Redquill', sage:"You are Redquill. A brutal editor. Be honest, direct, and dismissive of fluff. Focus on pacing and impact."}
+];
 
-// 1. Updated the API endpoint to the latest stable model
-const API_KEY = "YOUR_GEMINI_API_KEY";
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
+let mode = 'noctuary';
+let messages = [];
+let uploadedFile = null;
 
-// 2. Added a sanitization function for large manuscripts
-function sanitizeManuscript(text) {
-    // This removes non-standard control characters that break the API's JSON parser
-    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
-               .replace(/[^\x00-\x7F]/g, function(ch) {
-                   // Keeps accented characters but ensures they are valid
-                   return ch; 
-               });
+// Initialize Modes
+const mBar = document.getElementById('modes');
+MODES.forEach(m => {
+  const b = document.createElement('button');
+  b.className = `mode-opt ${m.id===mode?'active':''}`;
+  b.innerText = m.label;
+  b.onclick = () => {
+    mode = m.id;
+    document.querySelectorAll('.mode-opt').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+  };
+  mBar.appendChild(b);
+});
+
+// Auto-expand textarea
+const tx = document.getElementById('prompt');
+tx.addEventListener('input', () => {
+  tx.style.height = 'auto';
+  tx.style.height = tx.scrollHeight + 'px';
+});
+
+// File Loading
+document.getElementById('f-in').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if(!f) return;
+  document.getElementById('stat-text').innerText = "Reading Scroll...";
+  try {
+    let content = "";
+    if(f.type === "application/pdf") {
+      const arr = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data:arr}).promise;
+      for(let i=1; i<=pdf.numPages; i++) {
+        const pg = await pdf.getPage(i);
+        const txt = await pg.getTextContent();
+        content += txt.items.map(it => it.str).join(" ") + "\n";
+      }
+    } else if(f.name.endsWith(".docx")) {
+      const arr = await f.arrayBuffer();
+      const res = await mammoth.extractRawText({arrayBuffer:arr});
+      content = res.value;
+    } else {
+      content = await f.text();
+    }
+    uploadedFile = { name: f.name, content: content };
+    document.getElementById('stat-text').innerText = f.name.toUpperCase();
+  } catch(err) {
+    document.getElementById('stat-text').innerText = "Reading Failed";
+  }
+});
+
+function renderMd(t) { return marked.parse(t); }
+
+function renderMessages() {
+  const el = document.getElementById('msgs');
+  el.innerHTML = '';
+  messages.forEach(m => {
+    const w = document.createElement('div');
+    w.className = 'msg-wrap';
+    const tag = m.file ? `<div class="file-tag">📜 ${m.file.name}</div>` : '';
+    w.innerHTML = `
+      <div class="msg-who ${m.role==='user'?'usr-n':'ai-n'}">${m.role==='user'?'SCRIBE':MODES.find(x=>x.id===mode).label}</div>
+      <div class="msg-body">${renderMd(m.content)}${tag}</div>
+    `;
+    el.appendChild(w);
+  });
+  el.scrollTop = el.scrollHeight;
 }
 
-async function handleSend() {
-  const promptEl = document.getElementById('prompt');
-  const query = promptEl.value.trim();
-  if (!query && !uploadedFile) return;
+function updateSendBtn() {
+  document.getElementById('send-btn').disabled = !tx.value.trim() && !uploadedFile;
+}
+tx.addEventListener('input', updateSendBtn);
 
-  // UI logic: Keep your existing message rendering
-  const userMsgIndex = messages.length;
-  messages.push({ role: 'user', content: query, file: uploadedFile ? { name: uploadedFile.name } : null });
+async function typewriter(text, msgIndex) {
+  const el = document.getElementById('msgs');
+  let i = 0;
+  return new Promise(resolve => {
+    function tick() {
+      if(i < text.length) {
+        i += 4;
+        messages[msgIndex].content = text.slice(0, i);
+        const wraps = el.querySelectorAll('.msg-wrap');
+        const last = wraps[wraps.length-1];
+        if(last) {
+          last.querySelector('.msg-body').innerHTML = renderMd(messages[msgIndex].content);
+        }
+        el.scrollTop = el.scrollHeight;
+        setTimeout(tick, 10);
+      } else {
+        messages[msgIndex].content = text;
+        resolve();
+      }
+    }
+    tick();
+  });
+}
+
+// -----------------------------------------------------------------
+// THE FIXED ENGINE: Corrects JSON parsing and safety blocks for 66k words
+// -----------------------------------------------------------------
+async function handleSend() {
+  const query = tx.value.trim();
+  if(!query && !uploadedFile) return;
+
+  // Cleanup: Strips Null bytes and control chars that crash JSON.stringify on 1MB+ strings
+  const sanitize = (s) => s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+  // Add User Message to UI
+  messages.push({ role:'user', content: query, file: uploadedFile ? {name: uploadedFile.name} : null });
   renderMessages();
-  promptEl.value = '';
+  tx.value = '';
+  tx.style.height = 'auto';
   updateSendBtn();
 
-  // PREPARE THE CONTEXT
-  let contextPrompt = "";
-  if (uploadedFile) {
-      // Use the cleaned version of your 66k word manuscript
-      const cleanBook = sanitizeManuscript(uploadedFile.content);
-      contextPrompt = `MANUSCRIPT CONTEXT:\n---START---\n${cleanBook}\n---END---\n\n`;
+  // Prepare Payload
+  let systemMessage = MODES.find(x=>x.id===mode).sage;
+  
+  // Map history to API format
+  let apiContents = messages.map(m => ({
+    role: m.role === 'user' ? 'user' : 'model',
+    parts: [{ text: m.content }]
+  }));
+
+  // If a file is active, we attach it to the CURRENT user part only to keep history lean
+  if(uploadedFile && uploadedFile.content) {
+    const cleanBook = sanitize(uploadedFile.content);
+    const lastIdx = apiContents.length - 1;
+    apiContents[lastIdx].parts[0].text = `[MANUSCRIPT_DATA: ${uploadedFile.name}]\n${cleanBook}\n\n[QUERY]: ${query}`;
   }
 
-  // Construct the API payload
-  // We combine the manuscript with the query only for the API call to keep the UI snappy
-  const apiMessages = messages.map((m, idx) => {
-      let text = m.content;
-      if (idx === userMsgIndex && uploadedFile) {
-          text = contextPrompt + "SCRIBE'S INQUIRY: " + m.content;
-      }
-      return { role: m.role === 'user' ? 'user' : 'model', parts: [{ text: text }] };
-  });
-
   try {
-    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: apiMessages })
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemMessage }] },
+        contents: apiContents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
+        // Critical for literature: prevents the AI from blocking content due to mature themes in manuscripts
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+        ]
+      })
     });
 
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error.message);
 
     const aiText = data.candidates[0].content.parts[0].text;
-    
-    // Trigger your original typewriter effect
-    const aiMsgIndex = messages.length;
     messages.push({ role: 'model', content: '' });
-    await typewriter(aiText, aiMsgIndex);
+    renderMessages();
+    await typewriter(aiText, messages.length - 1);
 
-  } catch (err) {
-    console.error("Noctuary Engine Error:", err);
-    // Use your original error styling
-    const errorMsg = "The ink has blurred... " + err.message;
-    messages.push({ role: 'model', content: errorMsg });
+  } catch(err) {
+    messages.push({ role: 'model', content: "_The ritual failed. The ink turned to lead._\n\n**Error:** " + err.message });
     renderMessages();
   }
 }
-
-// [ALL YOUR ORIGINAL TYPEWRITER, RENDER, AND MODE-SWITCHING FUNCTIONS REMAIN UNCHANGED]
 </script>
 </body>
 </html>
