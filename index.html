@@ -257,8 +257,12 @@ html,body{height:100%;overflow:hidden;position:fixed;width:100%}
 .file-btn{padding:10px;font-size:14px}
 .input-row textarea{font-size:16px;padding:10px 14px}
 .msg-wrap{padding:12px 14px}
-.msg-body{font-size:16px}
-.msg-av{width:30px;height:30px;font-size:13px}
+.msg-body{font-size:15px!important;line-height:1.65}
+.msg-body p,.msg-body li,.msg-body blockquote{font-size:15px!important}
+.msg-body h1{font-size:17px!important}.msg-body h2{font-size:16px!important}.msg-body h3{font-size:15px!important}
+.msg-body pre,.msg-body code{font-size:12px!important}
+.msg-who{font-size:9px!important}
+.msg-av{width:28px;height:28px;font-size:12px}
 .msg-row{gap:10px}
 .topbar{padding:10px 14px}
 .tb-mode{font-size:14px}
@@ -896,13 +900,47 @@ async function send() {
     } else if (data.error) {
       reply = `⚠️ API Error: ${data.error.message || 'Unknown error'}. Make sure your API key is set correctly.`;
     }
-    messages.push({ role: 'assistant', content: reply });
+    messages.push({ role: 'assistant', content: '' });
+    loading = false;
+    renderMessages();
+    // Typewriter effect
+    await typewriter(reply, messages.length - 1);
   } catch (err) {
     messages.push({ role: 'assistant', content: `⚠️ Connection error: ${err.message}. Check your API key and try again.` });
-  } finally {
     loading = false;
     renderMessages();
   }
+}
+
+async function typewriter(text, msgIndex) {
+  const el = document.getElementById('msgs');
+  const speed = 12; // ms per character
+  const chunkSize = 3; // characters per tick for faster feel
+  let i = 0;
+  return new Promise(resolve => {
+    function tick() {
+      if (i < text.length) {
+        i = Math.min(i + chunkSize, text.length);
+        messages[msgIndex].content = text.slice(0, i);
+        // Only update the last message div, not full re-render
+        const msgDivs = el.querySelectorAll('.msg-wrap');
+        const lastMsg = msgDivs[msgDivs.length - 1];
+        if (lastMsg) {
+          const bodyEl = lastMsg.querySelector('.msg-body');
+          if (bodyEl) {
+            bodyEl.innerHTML = '<div class="msg-who ai-n">' + MODES.find(x=>x.id===mode).label + '</div>' + renderMd(messages[msgIndex].content);
+          }
+        }
+        el.scrollTop = el.scrollHeight;
+        setTimeout(tick, speed);
+      } else {
+        messages[msgIndex].content = text;
+        renderMessages();
+        resolve();
+      }
+    }
+    tick();
+  });
 }
 
 // ==================== BOOT ====================
