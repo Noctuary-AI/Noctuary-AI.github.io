@@ -6,222 +6,1932 @@
 <title>NOCTUARY — The Literature-First AI</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<!-- File parsers: pdf.js for PDFs, mammoth for Word docs.
+     Loaded with fallback chain: jsdelivr → unpkg → cdnjs (in case any are blocked) -->
 <script>
 (function(){
+  // Load a script with fallback URLs. Resolves when one succeeds, rejects if all fail.
   function loadScript(urls, name) {
     return new Promise((resolve, reject) => {
       let i = 0;
       function tryNext() {
-        if (i >= urls.length) return reject(`Failed to load ${name}`);
+        if (i >= urls.length) {
+          reject(new Error(name + ' could not be loaded from any CDN'));
+          return;
+        }
         const s = document.createElement('script');
         s.src = urls[i++];
-        s.onload = resolve;
-        s.onerror = tryNext;
+        s.onload = () => resolve();
+        s.onerror = () => { s.remove(); tryNext(); };
         document.head.appendChild(s);
       }
       tryNext();
     });
   }
-  const pdfUrls = ["https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.min.js","https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js","https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"];
-  const mamUrls = ["https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js","https://unpkg.com/mammoth@1.6.0/mammoth.browser.min.js","https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"];
-  const markUrls = ["https://cdn.jsdelivr.net/npm/marked/marked.min.js","https://unpkg.com/marked/marked.min.js","https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"];
-  Promise.all([loadScript(pdfUrls, 'pdfjs'), loadScript(mamUrls, 'mammoth'), loadScript(markUrls, 'marked')])
-    .then(() => { console.log("Parsers Ready."); pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.4.120/build/pdf.worker.min.js'; })
-    .catch(e => console.error(e));
+
+  // Load both libraries in parallel. Track readiness on window so handleFile can check.
+  // pdf.js pinned to v3.11.174 (last version with clean .js builds — v4+ is ESM-only).
+  // We invoke pdf.js with disableWorker:true at parse time, so worker URL setup is unnecessary
+  // and would actually break in sandboxed iframe contexts.
+  window.__noctuaryParsersReady = Promise.all([
+    loadScript([
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+      'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+    ], 'pdf.js'),
+    loadScript([
+      'https://cdn.jsdelivr.net/npm/mammoth@1.7.2/mammoth.browser.min.js',
+      'https://unpkg.com/mammoth@1.7.2/mammoth.browser.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.2/mammoth.browser.min.js'
+    ], 'mammoth.js')
+  ]);
+  // Silence rejection warning — handleFile awaits this and surfaces errors via the UI chip
+  window.__noctuaryParsersReady.catch(() => {});
 })();
 </script>
 <style>
-:root{--bg-deep:#0c0a10;--bg:#110f16;--bg-s:#16131e;--bg-t:#1e1a28;--bg-h:#252132;--tx:#e0dce8;--tx-m:#8b84a0;--tx-d:#5c5572;--hd:#f0ecf6;--ac:#c9a0ff;--ac2:#d4b3ff;--acg:#d4a853;--acg2:#e8c06a;--ac-h:#dfc5ff;--ac-dim:rgba(201,160,255,.1);--ac-bdr:rgba(201,160,255,.25);--acg-dim:rgba(212,168,83,.12);--acg-bdr:rgba(212,168,83,.3);--bdr:#2a2436;--bdr2:#332d42;--code:rgba(0,0,0,.35);--usr:#1a1624}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:var(--bg-deep);color:var(--tx);font-family:'Crimson Pro',serif;line-height:1.6;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;position:relative}
-body::before{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(circle at 50% 50%,transparent 0,rgba(12,10,16,.4) 100%),url("https://www.transparenttextures.com/patterns/dark-matter.png");pointer-events:none;z-index:0;opacity:.5}
-.cobweb{position:absolute;pointer-events:none;opacity:.15;z-index:1;filter:contrast(1.2) brightness(.8)}
-.cob-tl{top:0;left:0;width:300px;height:300px}
-.cob-tr{top:0;right:0;width:250px;height:250px;transform:scaleX(-1)}
-header{position:relative;z-index:10;padding:1.25rem 2rem;display:flex;justify-content:space-between;align-items:center;background:linear-gradient(to bottom,var(--bg-deep),transparent);border-bottom:1px solid var(--bdr)}
-.logo-wrap{display:flex;align-items:center;gap:1rem}
-.logo{font-family:'Cinzel',serif;font-weight:900;font-size:1.4rem;letter-spacing:5px;color:var(--ac);text-shadow:0 0 20px var(--ac-dim)}
-.logo span{color:var(--acg)}
-.sys-status{font-family:'JetBrains Mono',monospace;font-size:.65rem;text-transform:uppercase;letter-spacing:2px;color:var(--tx-d);display:flex;align-items:center;gap:8px}
-.status-dot{width:4px;height:4px;background:var(--acg);border-radius:50%;box-shadow:0 0 8px var(--acg)}
-#main-layout{flex:1;display:flex;overflow:hidden;position:relative;z-index:1}
-#msgs{flex:1;overflow-y:auto;padding:2.5rem 15%;display:flex;flex-direction:column;gap:3rem;scrollbar-width:thin;scrollbar-color:var(--bdr) transparent}
-#msgs::-webkit-scrollbar{width:5px}
-#msgs::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:10px}
-.msg-wrap{width:100%;max-width:850px;margin:0 auto;position:relative;animation:msgIn .6s cubic-bezier(.16,1,.3,1)}
-@keyframes msgIn{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
-.msg-who{font-family:'Cinzel',serif;font-size:.7rem;font-weight:700;letter-spacing:3px;text-transform:uppercase;margin-bottom:1rem;display:flex;align-items:center;gap:12px}
-.msg-who::after{content:"";height:1px;flex:1;background:linear-gradient(to right,var(--bdr2),transparent)}
-.ai-n{color:var(--ac)}
-.usr-n{color:var(--acg)}
-.msg-body{font-size:1.18rem;font-weight:300;color:var(--tx);white-space:pre-wrap;letter-spacing:.01em}
-.msg-body p{margin-bottom:1.2rem}
-.msg-body p:last-child{margin-bottom:0}
-.msg-body code{font-family:'JetBrains Mono',monospace;font-size:.9rem;background:var(--code);padding:.2rem .4rem;border-radius:3px;color:var(--ac2)}
-.msg-body pre{background:var(--code);padding:1.2rem;border-radius:6px;overflow-x:auto;margin:1.5rem 0;border:1px solid var(--bdr)}
-.file-tag{display:inline-flex;align-items:center;gap:8px;background:var(--acg-dim);border:1px solid var(--acg-bdr);color:var(--acg);padding:.4rem .8rem;font-family:'JetBrains Mono',monospace;font-size:.7rem;margin-top:1rem;border-radius:3px;text-transform:uppercase;letter-spacing:1px}
-footer{position:relative;z-index:10;padding:1.5rem 15% 2.5rem;background:linear-gradient(to top,var(--bg-deep) 40%,transparent)}
-.input-stage{max-width:850px;margin:0 auto;position:relative}
-.text-area-wrap{position:relative;background:var(--bg-s);border:1px solid var(--bdr2);border-radius:8px;transition:all .4s cubic-bezier(.16,1,.3,1);box-shadow:0 10px 30px rgba(0,0,0,.3)}
-.text-area-wrap:focus-within{border-color:var(--ac-bdr);box-shadow:0 0 0 1px var(--ac-bdr),0 15px 40px rgba(0,0,0,.4)}
-textarea{width:100%;background:transparent;border:none;color:var(--tx);padding:1.2rem 1.5rem;font-family:'Crimson Pro',serif;font-size:1.15rem;resize:none;outline:none;min-height:80px;max-height:300px;scrollbar-width:none}
-.controls{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1.2rem;border-top:1px solid var(--bdr)}
-.modes-bar{display:flex;gap:1.5rem}
-.mode-opt{background:none;border:none;color:var(--tx-d);font-family:'Cinzel',serif;font-size:.65rem;font-weight:700;letter-spacing:2px;cursor:pointer;transition:all .3s;padding-bottom:4px;border-bottom:1px solid transparent;text-transform:uppercase}
-.mode-opt:hover{color:var(--tx-m)}
-.mode-opt.active{color:var(--ac);border-bottom-color:var(--ac)}
-.action-btns{display:flex;gap:1rem;align-items:center}
-.icon-btn{background:none;border:none;color:var(--tx-d);cursor:pointer;display:flex;align-items:center;transition:all .3s}
-.icon-btn:hover{color:var(--ac2)}
-.send-btn{background:var(--ac-dim);border:1px solid var(--ac-bdr);color:var(--ac);font-family:'Cinzel',serif;font-size:.7rem;font-weight:800;letter-spacing:2px;padding:.5rem 1.5rem;border-radius:4px;cursor:pointer;transition:all .3s;text-transform:uppercase}
-.send-btn:hover:not(:disabled){background:var(--ac);color:var(--bg-deep)}
-.send-btn:disabled{opacity:.3;cursor:not-allowed}
-.candle-area{position:absolute;bottom:40px;right:40px;display:flex;flex-direction:column;align-items:center;pointer-events:none;z-index:1;opacity:.6}
-.flame{width:12px;height:25px;background:#ff9d00;border-radius:50% 50% 20% 20%;filter:blur(2px);animation:flicker 1.5s infinite alternate;box-shadow:0 0 20px #ff5e00}
-.candle-body{width:20px;height:60px;background:#d4c8b5;border-radius:2px;margin-top:-5px}
-@keyframes flicker{0%{transform:scale(1) rotate(-1deg);opacity:.8}100%{transform:scale(1.1) rotate(1deg);opacity:1}}
+:root{
+--bg-deep:#0c0a10;--bg:#110f16;--bg-s:#16131e;--bg-t:#1e1a28;--bg-h:#252132;
+--tx:#e0dce8;--tx-m:#8b84a0;--tx-d:#5c5572;--hd:#f0ecf6;
+--ac:#c9a0ff;--ac2:#d4b3ff;--acg:#d4a853;--acg2:#e8c06a;
+--ac-h:#dfc5ff;--ac-dim:rgba(201,160,255,.1);--ac-bdr:rgba(201,160,255,.25);
+--acg-dim:rgba(212,168,83,.12);--acg-bdr:rgba(212,168,83,.3);
+--bdr:#2a2436;--bdr2:#332d42;--code:rgba(0,0,0,.35);--usr:#1a1624;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Crimson Pro',Georgia,serif;background:var(--bg-deep);color:var(--tx);height:100vh;height:100dvh;overflow:hidden;font-size:18px}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}
+button{font-family:inherit;cursor:pointer}
+textarea::placeholder{color:var(--tx-m);opacity:.5}
+
+/* LAYOUT */
+#app{display:flex;height:100vh;position:relative;background:transparent}
+#about-page{display:none;height:100vh;overflow-y:auto;background:var(--bg-deep)}
+
+/* ATMOSPHERE */
+.atmosphere{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:hidden}
+.atmo-vignette{position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,transparent 25%,rgba(8,6,12,.75) 100%)}
+
+/* COBWEBS */
+.cobweb{position:absolute;opacity:.15}
+.cobweb-tr{top:0;right:0;width:200px;height:200px;border-top:1px solid rgba(200,200,200,.4);border-right:1px solid rgba(200,200,200,.4);background:
+  linear-gradient(225deg,rgba(200,200,200,.08) 0%,transparent 60%),
+  radial-gradient(ellipse at 100% 0%,rgba(200,200,200,.06) 0%,transparent 70%);
+  mask-image:linear-gradient(225deg,black 0%,transparent 80%);-webkit-mask-image:linear-gradient(225deg,black 0%,transparent 80%)}
+.cobweb-tr::before{content:'';position:absolute;width:100%;height:100%;top:0;right:0;background:repeating-linear-gradient(60deg,transparent,transparent 18px,rgba(200,200,200,.04) 18px,rgba(200,200,200,.04) 19px),repeating-linear-gradient(30deg,transparent,transparent 22px,rgba(200,200,200,.03) 22px,rgba(200,200,200,.03) 23px)}
+
+/* BOOKSHELF - bottom left castle study */
+.bookshelf{position:fixed;bottom:105px;left:280px;z-index:2;pointer-events:none;opacity:.9;transition:opacity .8s ease}
+@media(max-width:700px){.bookshelf{display:none}.candle-set{display:none}.scene-left,.scene-right{display:none!important}}
+
+/* PERSONALITY SCENES */
+.scene-left,.scene-right{position:fixed;z-index:2;pointer-events:none;transition:opacity .8s ease;opacity:0}
+.scene-left{left:270px;bottom:95px}
+.scene-right{right:25px;bottom:95px}
+.scene-left.active,.scene-right.active{opacity:1}
+
+/* CANDLE ON ORNATE TABLE */
+.candle-set{position:fixed;bottom:112px;right:35px;z-index:2;pointer-events:none;opacity:.9;transition:opacity .8s ease}
+/* Ornate table */
+.candle-tabletop{width:70px;height:6px;background:linear-gradient(180deg,#4a3520,#3a2815);border-radius:2px;margin:0 auto;box-shadow:0 2px 8px rgba(0,0,0,.5);position:relative}
+.candle-tabletop::before{content:'';position:absolute;top:0;left:5px;right:5px;height:2px;background:linear-gradient(90deg,transparent,rgba(212,168,83,.25),transparent);border-radius:1px}
+.candle-trim{width:74px;height:4px;background:linear-gradient(180deg,#5a4028,#3a2815);margin:0 auto;border-radius:0 0 1px 1px;position:relative}
+.candle-trim::before{content:'';position:absolute;top:0;left:8px;right:8px;height:1px;background:linear-gradient(90deg,rgba(212,168,83,.15),rgba(212,168,83,.3),rgba(212,168,83,.15))}
+.candle-trim::after{content:'';position:absolute;bottom:0;left:3px;right:3px;height:1px;background:linear-gradient(90deg,rgba(212,168,83,.1),rgba(212,168,83,.2),rgba(212,168,83,.1))}
+.candle-apron{width:60px;height:5px;background:linear-gradient(180deg,#3a2815,#2e1f0f);margin:0 auto;clip-path:polygon(5% 0%,95% 0%,100% 100%,0% 100%)}
+.candle-leg-group{display:flex;justify-content:space-between;width:54px;margin:0 auto}
+.candle-leg{width:5px;height:30px;background:linear-gradient(180deg,#3a2815,#2a1a0a);position:relative}
+.candle-leg.left{border-radius:0 0 0 3px;transform:perspective(50px) rotateY(3deg)}
+.candle-leg.right{border-radius:0 0 3px 0;transform:perspective(50px) rotateY(-3deg)}
+.candle-leg::before{content:'';position:absolute;top:8px;left:0;width:100%;height:1px;background:rgba(212,168,83,.12)}
+.candle-leg::after{content:'';position:absolute;top:18px;left:0;width:100%;height:1px;background:rgba(212,168,83,.08)}
+.candle-stretcher{width:44px;height:2px;background:linear-gradient(90deg,transparent,#2e1f0f,#2e1f0f,transparent);margin:-12px auto 0;position:relative;z-index:-1}
+/* Candle stick */
+.candle-holder{width:18px;height:5px;background:linear-gradient(180deg,#8a7040,#6a5530);border-radius:2px;margin:0 auto;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.candle-body{width:14px;height:45px;background:linear-gradient(90deg,#f0e0c0,#e8d8b8,#f5e6c8,#e0d0a8);border-radius:3px 3px 0 0;margin:0 auto;position:relative;box-shadow:inset -2px 0 4px rgba(0,0,0,.08)}
+.candle-body::after{content:'';position:absolute;top:10px;left:2px;right:4px;height:100%;background:repeating-linear-gradient(180deg,transparent,transparent 8px,rgba(200,160,80,.06) 8px,rgba(200,160,80,.06) 9px)}
+.candle-drip1{position:absolute;top:-2px;right:-2px;width:5px;height:12px;background:linear-gradient(180deg,#f0e0c0,#e8d8b8);border-radius:0 3px 3px 3px;opacity:.7}
+.candle-drip2{position:absolute;top:5px;left:-1px;width:4px;height:8px;background:linear-gradient(180deg,#ede0c4,#e0d0a8);border-radius:3px 0 3px 3px;opacity:.6}
+.candle-wick{width:2px;height:10px;background:linear-gradient(180deg,#555,#222);margin:0 auto;border-radius:1px;position:relative}
+.candle-wick::after{content:'';position:absolute;top:-1px;left:-0.5px;width:3px;height:3px;background:#ff6600;border-radius:50%;box-shadow:0 0 3px 1px rgba(255,100,0,.5)}
+/* Flame - slow gentle wave */
+.candle-flame{position:relative;margin:0 auto;width:14px;height:24px}
+.flame-inner{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:9px;height:18px;background:radial-gradient(ellipse at 50% 85%,#fff 0%,#ffe88a 15%,#ffaa33 40%,#ff6600 70%,transparent 100%);border-radius:50% 50% 50% 50% / 65% 65% 35% 35%;animation:flamewave 3s ease-in-out infinite}
+.flame-outer{position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:18px;height:28px;background:radial-gradient(ellipse at 50% 80%,rgba(255,200,50,.25) 0%,rgba(255,120,0,.08) 50%,transparent 100%);border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;animation:flameglow 4s ease-in-out infinite;filter:blur(2px)}
+.candle-glow{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);width:250px;height:250px;background:radial-gradient(circle,rgba(255,170,50,.07) 0%,rgba(255,130,20,.03) 35%,transparent 70%);animation:candleglow 5s ease-in-out infinite alternate}
+@keyframes flamewave{
+0%{height:18px;width:9px;transform:translateX(-50%) rotate(0deg);opacity:.95}
+15%{height:20px;width:8px;transform:translateX(-50%) rotate(1.5deg);opacity:1}
+30%{height:17px;width:9px;transform:translateX(-50%) rotate(-0.5deg);opacity:.9}
+50%{height:21px;width:8px;transform:translateX(-50%) rotate(2deg);opacity:1}
+65%{height:18px;width:10px;transform:translateX(-50%) rotate(-1deg);opacity:.92}
+80%{height:19px;width:8px;transform:translateX(-50%) rotate(1deg);opacity:.97}
+100%{height:18px;width:9px;transform:translateX(-50%) rotate(0deg);opacity:.95}
+}
+@keyframes flameglow{
+0%{opacity:.2;transform:translateX(-50%) scaleY(1) rotate(0deg)}
+25%{opacity:.25;transform:translateX(-50%) scaleY(1.05) rotate(1deg)}
+50%{opacity:.18;transform:translateX(-50%) scaleY(.95) rotate(-0.5deg)}
+75%{opacity:.22;transform:translateX(-50%) scaleY(1.03) rotate(0.5deg)}
+100%{opacity:.2;transform:translateX(-50%) scaleY(1) rotate(0deg)}
+}
+@keyframes candleglow{
+0%{opacity:.5;transform:translateX(-50%) scale(1)}
+50%{opacity:.7;transform:translateX(-50%) scale(1.08)}
+100%{opacity:.5;transform:translateX(-50%) scale(.96)}
+}
+
+/* WISPS */
+.wisp{position:absolute;border-radius:50%;filter:blur(3px);animation:wispfloat linear infinite}
+.wisp::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:40%;height:40%;background:rgba(255,255,255,.6);border-radius:50%;filter:blur(1px)}
+@keyframes wispfloat{
+0%{transform:translate(0,0) scale(1);opacity:0}
+5%{opacity:.7}
+25%{transform:translate(120px,-80px) scale(1.2);opacity:.8}
+50%{transform:translate(200px,-30px) scale(.8);opacity:.5}
+75%{transform:translate(80px,-150px) scale(1.1);opacity:.7}
+95%{opacity:.3}
+100%{transform:translate(-20px,-200px) scale(.6);opacity:0}
+}
+@keyframes wispfloat2{
+0%{transform:translate(0,0) scale(.8);opacity:0}
+5%{opacity:.6}
+30%{transform:translate(-100px,-60px) scale(1);opacity:.7}
+60%{transform:translate(-40px,-140px) scale(1.3);opacity:.5}
+90%{opacity:.2}
+100%{transform:translate(-150px,-250px) scale(.5);opacity:0}
+}
+@keyframes wispfloat3{
+0%{transform:translate(0,0) scale(1);opacity:0}
+8%{opacity:.5}
+35%{transform:translate(60px,40px) scale(.9);opacity:.6}
+65%{transform:translate(160px,-60px) scale(1.1);opacity:.4}
+100%{transform:translate(250px,-120px) scale(.7);opacity:0}
+}
+@keyframes wisppulse{
+0%,100%{box-shadow:0 0 8px 4px rgba(100,160,255,.2)}
+50%{box-shadow:0 0 15px 8px rgba(100,160,255,.35)}
+}
+
+/* FLOATING DUST/EMBERS */
+.ember{position:absolute;border-radius:50%;animation:emberfloat linear infinite}
+@keyframes emberfloat{
+0%{transform:translateY(0) translateX(0);opacity:0}
+8%{opacity:.8}
+50%{transform:translateY(-45vh) translateX(30px);opacity:.6}
+92%{opacity:.3}
+100%{transform:translateY(-95vh) translateX(-10px);opacity:0}
+}
+@keyframes emberfloat2{
+0%{transform:translateY(0) translateX(0);opacity:0}
+10%{opacity:.7}
+50%{transform:translateY(-50vh) translateX(-25px);opacity:.5}
+100%{transform:translateY(-100vh) translateX(15px);opacity:0}
+}
+
+.sb,.main,.topbar,.input-area{position:relative;z-index:1}
+
+/* PERSONALITY THEMES */
+body.theme-sage{--ac:#c9a0ff;--ac2:#d4b3ff;--acg:#d4a853;--bg-deep:#0c0a10;--bdr:#2a2436}
+body.theme-redquill{--ac:#ff6b6b;--ac2:#ff8a8a;--acg:#cc4444;--bg-deep:#100a0a;--bdr:#362424}
+body.theme-muse{--ac:#6bffb8;--ac2:#8affd0;--acg:#40cc8a;--bg-deep:#080f0c;--bdr:#1a3628}
+body.theme-architect{--ac:#6bb8ff;--ac2:#8acaff;--acg:#4a90cc;--bg-deep:#080a10;--bdr:#1a2436}
+body.theme-lorekeeper{--ac:#a8d86b;--ac2:#c0e88a;--acg:#8ab850;--bg-deep:#0a0f08;--bdr:#243618}
+
+/* Theme-specific atmosphere overlays */
+.theme-overlay{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;transition:opacity .8s ease;opacity:0}
+.theme-overlay.active{opacity:1}
+.theme-sage-bg{background:radial-gradient(ellipse at 8% 92%,rgba(212,168,83,.12) 0%,transparent 45%),radial-gradient(ellipse at 92% 8%,rgba(201,160,255,.08) 0%,transparent 45%)}
+.theme-redquill-bg{background:radial-gradient(ellipse at 50% 100%,rgba(180,40,40,.08) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(255,60,60,.05) 0%,transparent 40%),linear-gradient(180deg,transparent 70%,rgba(100,20,20,.06) 100%)}
+.theme-muse-bg{background:radial-gradient(ellipse at 30% 70%,rgba(60,255,160,.06) 0%,transparent 50%),radial-gradient(ellipse at 70% 30%,rgba(100,200,255,.05) 0%,transparent 45%),radial-gradient(circle at 50% 50%,rgba(107,255,184,.03) 0%,transparent 40%)}
+.theme-architect-bg{background:radial-gradient(ellipse at 50% 50%,rgba(80,140,220,.06) 0%,transparent 50%),radial-gradient(ellipse at 20% 80%,rgba(100,170,255,.05) 0%,transparent 40%),linear-gradient(0deg,rgba(40,70,120,.04) 0%,transparent 40%)}
+.theme-lorekeeper-bg{background:radial-gradient(ellipse at 40% 90%,rgba(80,140,40,.08) 0%,transparent 50%),radial-gradient(ellipse at 80% 30%,rgba(168,216,107,.05) 0%,transparent 45%),radial-gradient(ellipse at 20% 20%,rgba(140,180,60,.04) 0%,transparent 40%)}
+
+/* SIDEBAR */
+.sb{width:270px;min-width:270px;background:var(--bg);border-right:1px solid var(--bdr);display:flex;flex-direction:column;transition:all .3s ease;overflow:hidden}
+.sb.shut{width:0;min-width:0;border:none}
+.sb-head{padding:22px 18px 16px;border-bottom:1px solid var(--bdr);background:linear-gradient(180deg,rgba(201,160,255,.03),transparent)}
+.logo-r{display:flex;align-items:center;gap:10px}
+.logo-i{font-size:26px}
+.logo-t{font-family:'Cinzel',serif;font-size:20px;font-weight:800;color:var(--ac);letter-spacing:3px}
+.logo-sub{font-size:11.5px;color:var(--tx-m);margin-top:4px;font-style:italic}
+.modes{padding:12px 10px;flex:1;overflow-y:auto}
+.modes-lab{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;color:var(--tx-d);text-transform:uppercase;letter-spacing:2px;margin:0 8px 10px}
+.m-btn{width:100%;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;margin-bottom:3px;background:transparent;border:1px solid transparent;border-radius:9px;text-align:left;color:var(--tx);transition:all .2s;font-size:14px}
+.m-btn:hover{background:var(--bg-t)}
+.m-btn.on{background:var(--ac-dim);border-color:var(--ac-bdr);color:var(--ac)}
+.m-ico{font-size:18px;line-height:24px;flex-shrink:0}
+.m-lab{font-weight:600;font-size:16px}
+.m-desc{font-size:13px;color:var(--tx-m);margin-top:2px;line-height:1.3}
+.sb-nav{padding:10px;border-top:1px solid var(--bdr);display:flex;flex-direction:column;gap:6px}
+.sb-btn{width:100%;padding:10px;background:transparent;border:1px solid var(--bdr);border-radius:9px;color:var(--tx-m);font-size:14.5px;transition:all .2s;letter-spacing:.3px}
+.sb-btn:hover{border-color:var(--ac-bdr);color:var(--ac);background:var(--ac-dim)}
+
+/* MAIN */
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:transparent}
+.topbar{padding:11px 20px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:12px;background:rgba(17,15,22,.85);backdrop-filter:blur(8px)}
+.menu-btn{background:transparent;border:none;color:var(--tx-m);font-size:19px;padding:4px 6px;border-radius:5px;transition:all .15s}
+.menu-btn:hover{background:var(--bg-t);color:var(--tx)}
+.tb-mode{font-size:16px;font-weight:600;color:var(--hd);font-family:'Cinzel',serif;letter-spacing:1px}
+.tb-desc{font-size:15px;color:var(--tx-m);font-style:italic;margin-left:4px}
+
+/* MESSAGES */
+.msgs{flex:1;overflow-y:auto;padding:24px 0;background:transparent}
+.msg-wrap{padding:14px 22px;max-width:800px;margin:0 auto;width:100%}
+.msg-row{display:flex;gap:13px;align-items:flex-start}
+.msg-av{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;margin-top:2px}
+.msg-av.usr{background:var(--usr);border:1px solid var(--bdr)}
+.msg-av.ai{background:var(--ac-dim);border:1px solid var(--ac-bdr)}
+.msg-who{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:5px}
+.msg-who.usr-n{color:var(--tx-m)}
+.msg-who.ai-n{color:var(--ac)}
+.msg-body{font-size:17px;line-height:1.75;min-width:0;flex:1}
+.msg-body pre{background:var(--code);padding:12px 16px;border-radius:7px;overflow-x:auto;font-size:13px;line-height:1.5;margin:10px 0;border:1px solid var(--bdr);font-family:'JetBrains Mono',monospace}
+.msg-body code{background:var(--code);padding:2px 5px;border-radius:3px;font-size:13px;font-family:'JetBrains Mono',monospace}
+.msg-body blockquote{border-left:3px solid var(--ac);padding-left:14px;margin:10px 0;color:var(--tx-m);font-style:italic}
+.msg-body h1,.msg-body h2,.msg-body h3{font-family:'Cinzel',serif;color:var(--hd);margin:18px 0 8px}
+.msg-body h1{font-size:19px}.msg-body h2{font-size:17px}.msg-body h3{font-size:15px}
+.msg-body p{margin:8px 0}
+.msg-body ul,.msg-body ol{margin:8px 0 8px 20px}
+.msg-body li{margin:4px 0}
+.msg-body strong{color:var(--hd)}
+.msg-body em{color:var(--ac2)}
+
+/* WELCOME */
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:40px 20px;text-align:center}
+.w-icon{font-size:56px;margin-bottom:20px;animation:float 6s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.w-title{font-family:'Cinzel',serif;font-size:34px;font-weight:900;color:var(--ac);letter-spacing:4px;margin-bottom:6px}
+.w-sub{font-size:16px;color:var(--acg);font-style:italic;margin-bottom:10px;letter-spacing:.5px}
+.w-desc{font-size:17px;color:var(--tx-m);max-width:520px;line-height:1.65;margin-bottom:30px}
+.w-prompts{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:560px}
+.w-p{padding:9px 16px;background:var(--bg-t);border:1px solid var(--bdr);border-radius:20px;color:var(--tx-m);font-size:15px;font-family:'Crimson Pro',serif;transition:all .2s}
+.w-p:hover{border-color:var(--ac-bdr);color:var(--ac);background:var(--ac-dim)}
+
+/* LOADING */
+.loading-dots{display:flex;gap:6px;padding-top:8px}
+.loading-dots span{width:7px;height:7px;border-radius:50%;background:var(--ac);opacity:.4;animation:pulse 1.4s ease-in-out infinite}
+.loading-dots span:nth-child(2){animation-delay:.2s}
+.loading-dots span:nth-child(3){animation-delay:.4s}
+@keyframes pulse{0%,80%,100%{transform:scale(.8);opacity:.3}40%{transform:scale(1.1);opacity:1}}
+
+/* INPUT */
+.input-area{padding:14px 22px 18px;border-top:1px solid var(--bdr);background:rgba(17,15,22,.85);backdrop-filter:blur(8px)}
+.input-row{max-width:800px;margin:0 auto;display:flex;gap:10px;align-items:flex-end}
+.input-row textarea{flex:1;padding:12px 16px;background:var(--bg-t);border:1px solid var(--bdr);border-radius:12px;color:var(--tx);font-size:17px;font-family:'Crimson Pro',Georgia,serif;line-height:1.6;resize:none;outline:none;max-height:200px;transition:border-color .2s}
+.input-row textarea:focus{border-color:var(--ac)}
+.file-btn{padding:12px;background:var(--bg-t);border:1px solid var(--bdr);border-radius:12px;color:var(--tx-m);font-size:16px;transition:all .2s;flex-shrink:0}
+.file-btn:hover{border-color:var(--acg-bdr);color:var(--acg)}
+.send-btn{padding:12px 18px;border:none;border-radius:12px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:.5px;transition:all .2s;white-space:nowrap;flex-shrink:0}
+.send-btn.on{background:var(--ac);color:#110f16;cursor:pointer}
+.send-btn.off{background:var(--bg-t);color:var(--tx-d);cursor:default}
+.input-foot{text-align:center;font-size:10.5px;color:var(--tx-d);margin-top:8px;font-family:'JetBrains Mono',monospace}
+.file-tag{max-width:800px;margin:6px auto 0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--acg);font-family:'JetBrains Mono',monospace}
+.file-tag button{background:none;border:none;color:var(--tx-m);font-size:14px;cursor:pointer}
+
+/* ABOUT PAGE */
+.about{max-width:780px;margin:0 auto;padding:60px 28px 80px}
+.about-back{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:var(--bg-t);border:1px solid var(--bdr);border-radius:8px;color:var(--tx-m);font-size:13px;margin-bottom:40px;transition:all .2s;text-decoration:none;cursor:pointer;font-family:'Crimson Pro',serif}
+.about-back:hover{border-color:var(--ac-bdr);color:var(--ac)}
+.about h1{font-family:'Cinzel',serif;font-size:42px;font-weight:900;color:var(--ac);letter-spacing:4px;margin-bottom:8px}
+.about .tagline{font-size:20px;color:var(--acg);font-style:italic;margin-bottom:40px}
+.about h2{font-family:'Cinzel',serif;font-size:22px;color:var(--ac2);margin:36px 0 14px;letter-spacing:1px}
+.about p{font-size:17px;line-height:1.8;margin-bottom:16px;color:var(--tx)}
+.about .highlight{color:var(--acg);font-weight:600}
+.about .sig{margin-top:50px;padding-top:30px;border-top:1px solid var(--bdr);font-size:14px;color:var(--tx-d);font-style:italic;text-align:center}
+.about .masters{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0 24px}
+.about .master{padding:14px 16px;background:var(--bg-s);border:1px solid var(--bdr);border-radius:10px}
+.about .master strong{color:var(--acg);font-size:15px}
+.about .master span{display:block;font-size:13px;color:var(--tx-m);margin-top:4px;line-height:1.4}
+
+/* RESPONSIVE */
+@media(max-width:700px){
+html,body{height:100%;overflow:hidden;position:fixed;width:100%}
+#app{height:100dvh;height:-webkit-fill-available}
+.sb{position:fixed;left:0;top:0;height:100%;z-index:200;width:275px;min-width:275px;transform:translateX(-100%);transition:transform .3s ease;box-shadow:4px 0 24px rgba(0,0,0,.6)}
+.sb.mob-open{transform:translateX(0)}
+.sb.shut{transform:translateX(-100%)}
+.mob-backdrop{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:150;-webkit-tap-highlight-color:transparent}
+.mob-backdrop.show{display:block}
+.main{height:100dvh;height:-webkit-fill-available}
+.msgs{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.input-area{padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom));border-top:1px solid var(--bdr);flex-shrink:0}
+.input-row{gap:8px}
+.input-foot{font-size:9px;margin-top:5px}
+.send-btn{padding:10px 14px;font-size:12px}
+.file-btn{padding:10px;font-size:14px}
+.input-row textarea{font-size:16px;padding:10px 14px}
+.msg-wrap{padding:10px 8px 10px 4px}
+.msg-body{font-size:15px!important;line-height:1.65;word-wrap:break-word;overflow-wrap:break-word}
+.msg-body p,.msg-body li,.msg-body blockquote{font-size:15px!important}
+.msg-body h1{font-size:17px!important}.msg-body h2{font-size:16px!important}.msg-body h3{font-size:15px!important}
+.msg-body pre,.msg-body code{font-size:12px!important;white-space:pre-wrap;word-break:break-all}
+.msg-who{font-size:9px!important}
+.msg-av{width:24px;height:24px;font-size:11px}
+.msg-row{gap:6px}
+.msg-row{gap:10px}
+.topbar{padding:10px 14px}
+.tb-mode{font-size:14px}
+.tb-desc{display:none}
+.w-title{font-size:26px;letter-spacing:2px}
+.w-sub{font-size:14px}
+.w-desc{font-size:14px;padding:0 10px}
+.w-prompts{gap:6px;padding:0 10px}
+.w-p{font-size:13px;padding:8px 12px}
+.w-icon{font-size:44px;margin-bottom:14px}
+.about{padding:30px 18px 60px}
+.about .masters{grid-template-columns:1fr}
+.about h1{font-size:28px;letter-spacing:2px}
+.about p{font-size:15px}
+.file-tag{font-size:11px;padding:4px 14px}
+}
 </style>
 </head>
-<body class="theme-noctuary">
-<svg class="cobweb cob-tl" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0,0 L100,0 M0,0 L0,100 M0,0 L70,30 M0,0 L30,70 M20,0 Q25,25 0,20 M40,0 Q45,45 0,40 M60,0 Q65,65 0,60 M80,0 Q85,85 0,80" stroke="white" stroke-width="0.2" fill="none"/></svg>
-<svg class="cobweb cob-tr" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0,0 L100,0 M0,0 L0,100 M0,0 L70,30 M0,0 L30,70 M20,0 Q25,25 0,20 M40,0 Q45,45 0,40 M60,0 Q65,65 0,60 M80,0 Q85,85 0,80" stroke="white" stroke-width="0.2" fill="none"/></svg>
-<header>
-  <div class="logo-wrap">
-    <div class="logo">NOCT<span>UARY</span></div>
+<body>
+
+<!-- ========== ATMOSPHERE ========== -->
+<div class="theme-overlay theme-sage-bg active" id="theme-sage-bg"></div>
+<div class="theme-overlay theme-redquill-bg" id="theme-redquill-bg"></div>
+<div class="theme-overlay theme-muse-bg" id="theme-muse-bg"></div>
+<div class="theme-overlay theme-architect-bg" id="theme-architect-bg"></div>
+<div class="theme-overlay theme-lorekeeper-bg" id="theme-lorekeeper-bg"></div>
+<div class="atmosphere">
+  <div class="atmo-vignette"></div>
+
+  <!-- Cobweb top-right -->
+  <div class="cobweb cobweb-tr"></div>
+
+  <!-- Blue Wisps -->
+  <div class="wisp" style="width:10px;height:10px;background:rgba(100,170,255,.5);left:60%;top:70%;animation:wispfloat 14s 0s infinite;box-shadow:0 0 12px 6px rgba(100,160,255,.25)"></div>
+  <div class="wisp" style="width:7px;height:7px;background:rgba(130,190,255,.4);left:75%;top:50%;animation:wispfloat2 18s 4s infinite;box-shadow:0 0 10px 5px rgba(120,170,255,.2)"></div>
+  <div class="wisp" style="width:8px;height:8px;background:rgba(100,150,255,.45);left:40%;top:80%;animation:wispfloat3 16s 8s infinite;box-shadow:0 0 11px 5px rgba(100,160,255,.22)"></div>
+  <div class="wisp" style="width:6px;height:6px;background:rgba(150,200,255,.35);left:85%;top:40%;animation:wispfloat 20s 12s infinite;box-shadow:0 0 8px 4px rgba(130,180,255,.18)"></div>
+
+  <!-- Floating Embers -->
+  <div class="ember" style="width:3px;height:3px;background:#d4a853;left:15%;bottom:0;animation:emberfloat 20s 0s infinite"></div>
+  <div class="ember" style="width:2px;height:2px;background:#e8c06a;left:45%;bottom:0;animation:emberfloat2 25s 3s infinite"></div>
+  <div class="ember" style="width:3px;height:3px;background:#d4a853;left:70%;bottom:0;animation:emberfloat 22s 7s infinite"></div>
+  <div class="ember" style="width:2px;height:2px;background:#c9a0ff;left:30%;bottom:0;animation:emberfloat2 28s 5s infinite"></div>
+  <div class="ember" style="width:2px;height:2px;background:#e8c06a;left:55%;bottom:0;animation:emberfloat 24s 10s infinite"></div>
+  <div class="ember" style="width:3px;height:3px;background:#d4a853;left:80%;bottom:0;animation:emberfloat2 19s 2s infinite"></div>
+</div>
+
+<!-- Old Bookshelf - bottom left -->
+<svg class="bookshelf" width="130" height="220" viewBox="0 0 130 220" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shelf frame - ancient dark wood -->
+  <rect x="5" y="8" width="120" height="212" rx="2" fill="#1a1008" stroke="#2a1a0a" stroke-width="1.5"/>
+  <rect x="8" y="11" width="114" height="206" rx="1" fill="#120c05"/>
+  <!-- Wood grain cracks -->
+  <line x1="7" y1="30" x2="7" y2="80" stroke="#0a0604" stroke-width=".8" opacity=".5"/>
+  <line x1="123" y1="60" x2="123" y2="140" stroke="#0a0604" stroke-width=".6" opacity=".4"/>
+  <line x1="8" y1="150" x2="10" y2="200" stroke="#0a0604" stroke-width=".5" opacity=".3"/>
+  <!-- Top decorative crown - ornate -->
+  <rect x="2" y="4" width="126" height="6" rx="1" fill="#2e1c0c"/>
+  <rect x="0" y="2" width="130" height="4" rx="1" fill="#3a2412" stroke="#4a3018" stroke-width=".5"/>
+  <rect x="4" y="0" width="122" height="3" rx="1" fill="#4a3018"/>
+  <circle cx="65" cy="3" r="2.5" fill="none" stroke="#d4a853" stroke-width=".5" opacity=".4"/>
+  <circle cx="40" cy="3" r="1.5" fill="#6a5030" opacity=".3"/>
+  <circle cx="90" cy="3" r="1.5" fill="#6a5030" opacity=".3"/>
+  
+  <!-- SHELF 1 -->
+  <rect x="10" y="12" width="110" height="4" fill="#2a1a0a"/>
+  <rect x="14" y="16" width="12" height="46" rx="1" fill="#3a1518"/>
+  <rect x="27" y="19" width="9" height="43" rx="1" fill="#1a2a3a"/>
+  <rect x="37" y="17" width="14" height="45" rx="1" fill="#2a1a08"/>
+  <rect x="52" y="20" width="8" height="42" rx="1" fill="#3a2a48"/>
+  <rect x="61" y="16" width="11" height="46" rx="1" fill="#1a3020"/>
+  <!-- Glowing book -->
+  <rect x="73" y="17" width="13" height="45" rx="1" fill="#2a1840"/>
+  <rect x="73" y="17" width="13" height="45" rx="1" fill="rgba(150,100,255,.08)"/>
+  <circle cx="79" cy="39" r="12" fill="rgba(150,100,255,.05)"/>
+  <rect x="87" y="18" width="10" height="44" rx="1" fill="#3a2010"/>
+  <rect x="98" y="21" width="8" height="41" rx="1" fill="#1a1a30"/>
+  <rect x="107" y="16" width="11" height="46" rx="1" fill="#2a1518"/>
+  <line x1="20" y1="28" x2="20" y2="33" stroke="#d4a853" stroke-width=".5" opacity=".4"/>
+  <line x1="44" y1="26" x2="44" y2="38" stroke="#c9a0ff" stroke-width=".4" opacity=".3"/>
+  
+  <!-- Shelf divider 1 -->
+  <rect x="8" y="62" width="114" height="5" fill="#2e1c0c" stroke="#3a2412" stroke-width=".3"/>
+  <!-- Cobweb on shelf edge -->
+  <path d="M 8 62 Q 20 58 30 62" fill="none" stroke="rgba(200,200,200,.15)" stroke-width=".4"/>
+  <path d="M 8 62 Q 15 55 25 58 Q 30 60 30 62" fill="none" stroke="rgba(200,200,200,.1)" stroke-width=".3"/>
+  
+  <!-- SHELF 2 -->
+  <rect x="12" y="67" width="15" height="50" rx="1" fill="#2a1830"/>
+  <rect x="28" y="71" width="10" height="46" rx="1" fill="#3a1a10" transform="rotate(-2 33 94)"/>
+  <rect x="39" y="69" width="12" height="48" rx="1" fill="#1a2a20"/>
+  <rect x="52" y="67" width="8" height="50" rx="1" fill="#4a2030"/>
+  <rect x="61" y="73" width="14" height="44" rx="1" fill="#2a2a1a"/>
+  <rect x="76" y="68" width="11" height="49" rx="1" fill="#1a1a3a"/>
+  <rect x="88" y="70" width="9" height="47" rx="1" fill="#3a2820"/>
+  <rect x="98" y="67" width="12" height="50" rx="1" fill="#28182a"/>
+  <rect x="111" y="72" width="8" height="45" rx="1" fill="#3a3018"/>
+  <line x1="19" y1="80" x2="19" y2="87" stroke="#d4a853" stroke-width=".4" opacity=".35"/>
+  <line x1="104" y1="79" x2="104" y2="90" stroke="#c9a0ff" stroke-width=".4" opacity=".25"/>
+  
+  <!-- Shelf divider 2 -->
+  <rect x="8" y="117" width="114" height="5" fill="#2e1c0c" stroke="#3a2412" stroke-width=".3"/>
+  
+  <!-- SHELF 3 -->
+  <rect x="12" y="122" width="13" height="52" rx="1" fill="#2a2018"/>
+  <rect x="26" y="126" width="10" height="48" rx="1" fill="#1a2838"/>
+  <rect x="37" y="123" width="16" height="51" rx="1" fill="#3a1a20"/>
+  <rect x="54" y="124" width="9" height="50" rx="1" fill="#1a3028"/>
+  <rect x="64" y="122" width="11" height="52" rx="1" fill="#382840"/>
+  <!-- Fallen books -->
+  <rect x="78" y="164" width="38" height="9" rx="1" fill="#4a2818" opacity=".8" transform="rotate(-5 97 168)"/>
+  <rect x="80" y="156" width="32" height="8" rx="1" fill="#2a1a30" opacity=".7" transform="rotate(-8 96 160)"/>
+  
+  <!-- Shelf divider 3 -->
+  <rect x="8" y="174" width="114" height="5" fill="#2e1c0c" stroke="#3a2412" stroke-width=".3"/>
+  
+  <!-- Bottom area - skull and potion -->
+  <rect x="12" y="180" width="106" height="36" fill="#0e0805" opacity=".4"/>
+  <!-- Small skull -->
+  <ellipse cx="35" cy="200" rx="8" ry="7" fill="#c8c0a8" opacity=".2"/>
+  <ellipse cx="35" cy="198" rx="7" ry="6" fill="#d8d0b8" opacity=".15"/>
+  <circle cx="32" cy="197" r="1.5" fill="#0c0a10" opacity=".3"/>
+  <circle cx="38" cy="197" r="1.5" fill="#0c0a10" opacity=".3"/>
+  <rect x="33" y="201" width="4" height="2" rx=".5" fill="#0c0a10" opacity=".15"/>
+  <!-- Potion bottle with glow -->
+  <rect x="90" y="195" width="8" height="14" rx="2" fill="rgba(80,200,120,.15)" stroke="rgba(100,220,140,.1)" stroke-width=".5"/>
+  <ellipse cx="94" cy="195" rx="5" ry="2.5" fill="rgba(80,200,120,.12)"/>
+  <rect x="92" y="190" width="4" height="6" rx="1" fill="rgba(60,180,100,.1)"/>
+  <circle cx="94" cy="202" r="10" fill="rgba(80,200,120,.03)"/>
+  
+  <!-- Dust on shelves -->
+  <circle cx="30" cy="62" r="1" fill="rgba(200,180,140,.12)"/>
+  <circle cx="80" cy="117" r=".8" fill="rgba(200,180,140,.1)"/>
+  <circle cx="55" cy="174" r=".7" fill="rgba(200,180,140,.08)"/>
+  
+  <!-- Side depth shadow -->
+  <rect x="5" y="8" width="6" height="212" fill="url(#shelfShadow)" opacity=".5"/>
+  <!-- Eerie top shadow drip -->
+  <rect x="8" y="11" width="114" height="15" fill="url(#shelfTopShadow)" opacity=".6"/>
+  <defs>
+    <linearGradient id="shelfShadow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#000"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </linearGradient>
+    <linearGradient id="shelfTopShadow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity=".5"/>
+      <stop offset="100%" stop-color="transparent"/>
+    </linearGradient>
+  </defs>
+</svg>
+<div class="candle-set">
+  <div class="candle-glow"></div>
+  <div class="candle-flame">
+    <div class="flame-outer"></div>
+    <div class="flame-inner"></div>
   </div>
-  <div class="sys-status">
-    <div class="status-dot"></div>
-    <span id="stat-text">Ready for Manuscript</span>
+  <div class="candle-wick"></div>
+  <div class="candle-body">
+    <div class="candle-drip1"></div>
+    <div class="candle-drip2"></div>
   </div>
-</header>
-<main id="main-layout">
-  <div id="msgs"></div>
-  <div class="candle-area">
-    <div class="flame"></div>
-    <div class="candle-body"></div>
+  <div class="candle-holder"></div>
+  <div class="candle-tabletop"></div>
+  <div class="candle-trim"></div>
+  <div class="candle-apron"></div>
+  <div class="candle-leg-group">
+    <div class="candle-leg left"></div>
+    <div class="candle-leg right"></div>
   </div>
-</main>
-<footer>
-  <div class="input-stage">
-    <div class="text-area-wrap">
-      <textarea id="prompt" placeholder="Invoke the ink..." rows="1"></textarea>
-      <div class="controls">
-        <div class="modes-bar" id="modes"></div>
-        <div class="action-btns">
-          <input type="file" id="f-in" style="display:none" accept=".txt,.pdf,.docx">
-          <button class="icon-btn" onclick="document.getElementById('f-in').click()" title="Attach Scroll">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-          </button>
-          <button id="send-btn" class="send-btn" onclick="handleSend()">Consult</button>
-        </div>
-      </div>
+  <div class="candle-stretcher"></div>
+</div>
+
+<!-- ========== PERSONALITY SCENES ========== -->
+
+<!-- RED QUILL - Left: Ink well with quill, Right: Scattered manuscript pages -->
+<svg class="scene-left scene-redquill-left" id="scene-redquill-left" width="140" height="200" viewBox="0 0 140 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Desk edge (thick, with wood grain shading) -->
+  <rect x="0" y="158" width="140" height="12" fill="#2a1a0a"/>
+  <rect x="0" y="156" width="140" height="4" fill="#3d2716"/>
+  <line x1="10" y1="164" x2="130" y2="164" stroke="rgba(80,40,20,.4)" stroke-width=".4"/>
+  <line x1="5" y1="168" x2="125" y2="168" stroke="rgba(60,30,15,.3)" stroke-width=".3"/>
+  <rect x="0" y="170" width="140" height="30" fill="#1a0f05"/>
+
+  <!-- Open manuscript page laid on desk -->
+  <rect x="55" y="130" width="75" height="30" fill="#d8cfb8" opacity=".12" transform="rotate(-4 92 145)"/>
+  <line x1="62" y1="138" x2="120" y2="136" stroke="rgba(90,50,30,.3)" stroke-width=".4" transform="rotate(-4 92 145)"/>
+  <line x1="62" y1="143" x2="118" y2="141" stroke="rgba(90,50,30,.25)" stroke-width=".4" transform="rotate(-4 92 145)"/>
+  <line x1="62" y1="148" x2="115" y2="146" stroke="rgba(90,50,30,.25)" stroke-width=".4" transform="rotate(-4 92 145)"/>
+  <line x1="62" y1="153" x2="110" y2="151" stroke="rgba(90,50,30,.2)" stroke-width=".4" transform="rotate(-4 92 145)"/>
+  <!-- Red editorial marks on page -->
+  <line x1="62" y1="138" x2="95" y2="136" stroke="rgba(200,40,40,.55)" stroke-width=".9" transform="rotate(-4 92 145)"/>
+  <path d="M 100 141 Q 108 138 116 141" fill="none" stroke="rgba(200,40,40,.5)" stroke-width=".8" transform="rotate(-4 92 145)"/>
+  <text x="98" y="155" fill="rgba(200,40,40,.5)" font-size="6" font-style="italic" transform="rotate(-4 92 145)">cut</text>
+
+  <!-- Inkwell (squat, solid, with rim and shadow) -->
+  <ellipse cx="30" cy="160" rx="22" ry="4" fill="rgba(0,0,0,.5)"/>
+  <rect x="14" y="130" width="32" height="30" rx="3" fill="#14141e"/>
+  <rect x="14" y="130" width="32" height="30" rx="3" fill="url(#inkwellGrad)"/>
+  <defs>
+    <linearGradient id="inkwellGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="rgba(255,255,255,.08)"/>
+      <stop offset=".4" stop-color="rgba(0,0,0,0)"/>
+      <stop offset="1" stop-color="rgba(0,0,0,.3)"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="30" cy="131" rx="16" ry="4.5" fill="#22222e"/>
+  <ellipse cx="30" cy="131" rx="16" ry="4.5" fill="none" stroke="#32323e" stroke-width=".6"/>
+  <ellipse cx="30" cy="132" rx="12" ry="3" fill="#050510"/>
+  <!-- Ink surface with red shimmer -->
+  <ellipse cx="30" cy="132" rx="10" ry="2" fill="rgba(140,20,20,.3)"/>
+  <ellipse cx="28" cy="131.5" rx="3" ry=".8" fill="rgba(255,80,80,.3)"/>
+
+  <!-- Quill standing in inkwell — a proper plumed feather pen -->
+  <!-- Spine/shaft (gently curved, thicker at base, thinner at tip) -->
+  <path d="M 32 131 Q 40 95 52 60 Q 60 40 68 22" stroke="#5a3a1a" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Spine highlight -->
+  <path d="M 32 131 Q 40 95 52 60 Q 60 40 68 22" stroke="#9a7040" stroke-width=".7" fill="none" stroke-linecap="round" opacity=".7"/>
+
+  <!-- Feather vane LEFT side (barbs sweeping back and up) -->
+  <path d="M 68 22
+           Q 60 20 53 24
+           Q 48 30 45 38
+           Q 42 46 40 54
+           Q 38 62 37 70
+           Q 36 78 36 86
+           Q 37 92 40 96
+           Q 45 90 48 80
+           Q 52 68 56 54
+           Q 60 40 64 30
+           Q 66 25 68 22 Z"
+        fill="#c8a558"/>
+  <!-- Left vane shadow/depth -->
+  <path d="M 68 22 Q 58 28 52 40 Q 46 55 42 70 Q 39 82 40 96"
+        stroke="#8a6830" stroke-width=".5" fill="none" opacity=".7"/>
+  <!-- Left vane barb lines (showing feather structure) -->
+  <line x1="65" y1="24" x2="55" y2="26" stroke="rgba(90,60,20,.55)" stroke-width=".35"/>
+  <line x1="62" y1="30" x2="50" y2="34" stroke="rgba(90,60,20,.5)" stroke-width=".35"/>
+  <line x1="58" y1="38" x2="46" y2="44" stroke="rgba(90,60,20,.5)" stroke-width=".35"/>
+  <line x1="54" y1="48" x2="42" y2="56" stroke="rgba(90,60,20,.45)" stroke-width=".35"/>
+  <line x1="50" y1="58" x2="39" y2="66" stroke="rgba(90,60,20,.45)" stroke-width=".35"/>
+  <line x1="47" y1="68" x2="37" y2="76" stroke="rgba(90,60,20,.4)" stroke-width=".35"/>
+  <line x1="44" y1="80" x2="37" y2="88" stroke="rgba(90,60,20,.4)" stroke-width=".35"/>
+
+  <!-- Feather vane RIGHT side (smaller, on outer curve) -->
+  <path d="M 68 22
+           Q 72 24 74 30
+           Q 75 38 73 46
+           Q 70 56 66 66
+           Q 62 78 58 88
+           Q 54 96 50 100
+           Q 46 102 44 100
+           Q 48 92 52 82
+           Q 58 68 62 54
+           Q 66 40 68 22 Z"
+        fill="#b8954a"/>
+  <!-- Right vane depth -->
+  <path d="M 68 22 Q 72 30 70 44 Q 66 60 60 76 Q 54 90 46 100"
+        stroke="#7a5a24" stroke-width=".5" fill="none" opacity=".6"/>
+  <!-- Right vane barb lines -->
+  <line x1="70" y1="26" x2="74" y2="30" stroke="rgba(80,50,15,.5)" stroke-width=".35"/>
+  <line x1="68" y1="34" x2="73" y2="42" stroke="rgba(80,50,15,.5)" stroke-width=".35"/>
+  <line x1="65" y1="44" x2="70" y2="54" stroke="rgba(80,50,15,.45)" stroke-width=".35"/>
+  <line x1="61" y1="56" x2="65" y2="66" stroke="rgba(80,50,15,.45)" stroke-width=".35"/>
+  <line x1="57" y1="68" x2="60" y2="78" stroke="rgba(80,50,15,.4)" stroke-width=".35"/>
+  <line x1="52" y1="82" x2="54" y2="92" stroke="rgba(80,50,15,.4)" stroke-width=".35"/>
+
+  <!-- Tip of feather (pointy top) -->
+  <path d="M 66 18 Q 68 12 70 16 Q 72 20 69 24 Z" fill="#c8a558"/>
+
+  <!-- Nib at base (slit pen tip going into ink) -->
+  <path d="M 30 128 L 32 131 L 34 128 Z" fill="#1a1012"/>
+  <line x1="32" y1="128" x2="32" y2="131" stroke="#050505" stroke-width=".4"/>
+  <!-- Red ink on nib -->
+  <ellipse cx="32" cy="131" rx="1.5" ry="1.8" fill="rgba(180,30,30,.95)"/>
+
+  <!-- Scattered red ink drops -->
+  <ellipse cx="52" cy="160" rx="3" ry="1" fill="rgba(180,30,30,.4)"/>
+  <circle cx="48" cy="158" r="1" fill="rgba(200,40,40,.5)"/>
+  <circle cx="58" cy="157" r=".7" fill="rgba(180,30,30,.3)"/>
+</svg>
+
+<svg class="scene-right scene-redquill-right" id="scene-redquill-right" width="140" height="180" viewBox="0 0 140 180" xmlns="http://www.w3.org/2000/svg">
+  <!-- Back page (deeper shadow, furthest back) -->
+  <g transform="rotate(8 70 100)">
+    <!-- Drop shadow under back page -->
+    <rect x="37" y="52" width="70" height="95" rx="1" fill="rgba(0,0,0,.4)"/>
+    <rect x="35" y="50" width="70" height="95" rx="1" fill="#d8cda8"/>
+    <rect x="35" y="50" width="70" height="95" rx="1" fill="none" stroke="rgba(70,40,20,.55)" stroke-width=".5"/>
+    <!-- Aged paper shading -->
+    <rect x="35" y="50" width="70" height="95" rx="1" fill="rgba(180,140,80,.1)"/>
+    <line x1="42" y1="60" x2="98" y2="60" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="42" y1="66" x2="95" y2="66" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="42" y1="72" x2="100" y2="72" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="42" y1="78" x2="92" y2="78" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="42" y1="84" x2="97" y2="84" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="42" y1="90" x2="90" y2="90" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="42" y1="96" x2="95" y2="96" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <line x1="42" y1="102" x2="88" y2="102" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <line x1="42" y1="108" x2="93" y2="108" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <line x1="42" y1="114" x2="90" y2="114" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <line x1="42" y1="120" x2="95" y2="120" stroke="rgba(60,30,10,.55)" stroke-width=".4"/>
+    <line x1="42" y1="126" x2="85" y2="126" stroke="rgba(60,30,10,.55)" stroke-width=".4"/>
+    <line x1="42" y1="132" x2="92" y2="132" stroke="rgba(60,30,10,.55)" stroke-width=".4"/>
+    <!-- Red strike across -->
+    <line x1="40" y1="72" x2="102" y2="72" stroke="rgba(200,40,40,.75)" stroke-width="1.4"/>
+  </g>
+
+  <!-- Middle page -->
+  <g transform="rotate(-3 70 100)">
+    <rect x="32" y="42" width="70" height="95" rx="1" fill="rgba(0,0,0,.35)"/>
+    <rect x="30" y="40" width="70" height="95" rx="1" fill="#e0d5b0"/>
+    <rect x="30" y="40" width="70" height="95" rx="1" fill="none" stroke="rgba(70,40,20,.55)" stroke-width=".5"/>
+    <!-- Paper shading -->
+    <rect x="30" y="40" width="70" height="95" rx="1" fill="rgba(180,140,80,.08)"/>
+    <line x1="37" y1="50" x2="92" y2="50" stroke="rgba(60,30,10,.75)" stroke-width=".4"/>
+    <line x1="37" y1="56" x2="95" y2="56" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="62" x2="88" y2="62" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="68" x2="93" y2="68" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="74" x2="90" y2="74" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="80" x2="96" y2="80" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="86" x2="85" y2="86" stroke="rgba(60,30,10,.7)" stroke-width=".4"/>
+    <line x1="37" y1="92" x2="94" y2="92" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="37" y1="98" x2="88" y2="98" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="37" y1="104" x2="92" y2="104" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="37" y1="110" x2="85" y2="110" stroke="rgba(60,30,10,.65)" stroke-width=".4"/>
+    <line x1="37" y1="116" x2="90" y2="116" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <line x1="37" y1="122" x2="82" y2="122" stroke="rgba(60,30,10,.6)" stroke-width=".4"/>
+    <!-- Big red X through a section -->
+    <line x1="40" y1="56" x2="88" y2="82" stroke="rgba(200,40,40,.8)" stroke-width="1.8"/>
+    <line x1="88" y1="56" x2="40" y2="82" stroke="rgba(200,40,40,.8)" stroke-width="1.8"/>
+    <!-- Caret insertion mark in margin -->
+    <path d="M 100 100 L 103 97 L 106 100" fill="none" stroke="rgba(200,40,40,.75)" stroke-width="1"/>
+  </g>
+
+  <!-- Front page (top of stack, most readable) -->
+  <g transform="rotate(4 70 110)">
+    <rect x="27" y="57" width="70" height="100" rx="1" fill="rgba(0,0,0,.3)"/>
+    <rect x="25" y="55" width="70" height="100" rx="1" fill="#ebe0ba"/>
+    <rect x="25" y="55" width="70" height="100" rx="1" fill="none" stroke="rgba(70,40,20,.6)" stroke-width=".5"/>
+    <!-- Light paper texture -->
+    <rect x="25" y="55" width="70" height="100" rx="1" fill="rgba(180,140,80,.05)"/>
+    <!-- Title line (thicker) -->
+    <line x1="35" y1="65" x2="75" y2="65" stroke="rgba(40,20,8,.9)" stroke-width=".9"/>
+    <!-- Body text lines -->
+    <line x1="32" y1="75" x2="85" y2="75" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="81" x2="88" y2="81" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="87" x2="82" y2="87" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="93" x2="86" y2="93" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="99" x2="80" y2="99" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="105" x2="85" y2="105" stroke="rgba(50,25,10,.8)" stroke-width=".4"/>
+    <line x1="32" y1="111" x2="78" y2="111" stroke="rgba(50,25,10,.75)" stroke-width=".4"/>
+    <line x1="32" y1="117" x2="84" y2="117" stroke="rgba(50,25,10,.75)" stroke-width=".4"/>
+    <line x1="32" y1="123" x2="72" y2="123" stroke="rgba(50,25,10,.75)" stroke-width=".4"/>
+    <line x1="32" y1="129" x2="82" y2="129" stroke="rgba(50,25,10,.75)" stroke-width=".4"/>
+    <line x1="32" y1="135" x2="76" y2="135" stroke="rgba(50,25,10,.7)" stroke-width=".4"/>
+    <line x1="32" y1="141" x2="80" y2="141" stroke="rgba(50,25,10,.7)" stroke-width=".4"/>
+    <!-- Red strikethroughs on specific lines -->
+    <line x1="30" y1="81" x2="90" y2="81" stroke="rgba(200,40,40,.85)" stroke-width="1.3"/>
+    <line x1="30" y1="99" x2="82" y2="99" stroke="rgba(200,40,40,.8)" stroke-width="1.2"/>
+    <!-- Margin note in red -->
+    <text x="88" y="88" fill="rgba(200,40,40,.85)" font-size="6.5" font-style="italic" font-weight="bold">weak</text>
+    <text x="88" y="124" fill="rgba(200,40,40,.85)" font-size="6.5" font-style="italic" font-weight="bold">cut</text>
+    <!-- Circled word -->
+    <circle cx="55" cy="105" r="4.5" fill="none" stroke="rgba(200,40,40,.8)" stroke-width="1"/>
+  </g>
+</svg>
+
+<!-- MUSE - Left: Scattered scrolls on floor, Right: (constellation is now full-screen overlay) -->
+<svg class="scene-left scene-muse-left" id="scene-muse-left" width="160" height="240" viewBox="0 0 160 240" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ceiling beam (wooden, textured) -->
+  <rect x="0" y="0" width="160" height="14" fill="#2a1a0a"/>
+  <rect x="0" y="0" width="160" height="3" fill="#3a2614"/>
+  <rect x="0" y="12" width="160" height="2" fill="#1a0e04"/>
+  <!-- Wood grain -->
+  <line x1="5" y1="5" x2="155" y2="5" stroke="rgba(80,45,20,.5)" stroke-width=".3"/>
+  <line x1="8" y1="8" x2="152" y2="8" stroke="rgba(70,40,18,.4)" stroke-width=".3"/>
+  <line x1="3" y1="10" x2="157" y2="10" stroke="rgba(80,45,20,.35)" stroke-width=".3"/>
+  <!-- Iron hook screwed into beam -->
+  <rect x="37" y="13" width="6" height="3" fill="#1a1a1a"/>
+  <path d="M 40 16 Q 40 22 43 24 Q 45 25 45 22" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+  <path d="M 40 16 Q 40 22 43 24 Q 45 25 45 22" fill="none" stroke="#2a2a2a" stroke-width=".6"/>
+
+  <!-- Rope (thick, twisted, hanging from hook) -->
+  <path d="M 42 24 Q 40 28 41 34 Q 39 38 41 42" stroke="#7a5a32" stroke-width="3.2" fill="none" stroke-linecap="round"/>
+  <!-- Rope twist highlights -->
+  <path d="M 41 25 Q 39 29 40 35" stroke="#a88050" stroke-width=".7" fill="none" opacity=".7"/>
+  <path d="M 42 31 Q 40 35 41 41" stroke="#6a4a22" stroke-width=".8" fill="none" opacity=".8"/>
+  <!-- Rope knot where it meets the ring -->
+  <ellipse cx="40" cy="42" rx="4" ry="3" fill="#7a5a32"/>
+  <ellipse cx="40" cy="42" rx="4" ry="3" fill="none" stroke="#5a3e1e" stroke-width=".5"/>
+  <path d="M 37 41 L 43 43 M 37 43 L 43 41" stroke="#5a3e1e" stroke-width=".4"/>
+
+  <!-- Lantern hanging ring -->
+  <circle cx="40" cy="46" r="2.8" fill="none" stroke="#2a2a2a" stroke-width="1"/>
+
+  <!-- Lantern top cap -->
+  <path d="M 28 58 L 52 58 L 48 53 L 32 53 Z" fill="#2a3a2a"/>
+  <rect x="33" y="50" width="14" height="4" rx="1" fill="#3a4a3a"/>
+  <!-- Ring-to-cap connector -->
+  <line x1="40" y1="49" x2="40" y2="53" stroke="#2a3a2a" stroke-width="1.5"/>
+
+  <!-- Lantern body (tapered) -->
+  <path d="M 25 58 L 55 58 L 57 108 L 23 108 Z" fill="#14201a" stroke="#2a3a2a" stroke-width=".8"/>
+  <!-- Lantern frame bars (vertical) -->
+  <line x1="30" y1="58" x2="30.5" y2="108" stroke="#2a3a2a" stroke-width="1.2"/>
+  <line x1="40" y1="58" x2="40" y2="108" stroke="#2a3a2a" stroke-width="1.2"/>
+  <line x1="50" y1="58" x2="49.5" y2="108" stroke="#2a3a2a" stroke-width="1.2"/>
+  <!-- Glass panels with inner glow -->
+  <rect x="31" y="60" width="8" height="46" fill="rgba(107,255,184,.1)"/>
+  <rect x="41" y="60" width="8" height="46" fill="rgba(107,255,184,.12)"/>
+  <!-- Flame inside lantern (central panel) -->
+  <ellipse cx="45" cy="90" rx="4" ry="10" fill="rgba(180,255,210,.35)">
+    <animate attributeName="ry" values="10;12;9;11;10" dur="3s" repeatCount="indefinite"/>
+  </ellipse>
+  <ellipse cx="45" cy="88" rx="2" ry="6" fill="rgba(220,255,230,.5)">
+    <animate attributeName="ry" values="6;8;5;7;6" dur="2.5s" repeatCount="indefinite"/>
+  </ellipse>
+  <!-- Wick -->
+  <line x1="45" y1="100" x2="45" y2="104" stroke="#444" stroke-width=".8"/>
+
+  <!-- Lantern base cap -->
+  <path d="M 23 108 L 57 108 L 54 114 L 26 114 Z" fill="#2a3a2a"/>
+  <rect x="28" y="114" width="24" height="3" fill="#1a2820"/>
+
+  <!-- Lantern ambient glow -->
+  <circle cx="40" cy="86" r="50" fill="rgba(107,255,184,.05)">
+    <animate attributeName="r" values="50;58;48;54;50" dur="6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".05;.08;.04;.06;.05" dur="6s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Desk surface below -->
+  <rect x="0" y="195" width="160" height="10" fill="#1e1a12"/>
+  <rect x="0" y="193" width="160" height="3" fill="#2e261a"/>
+  <rect x="0" y="205" width="160" height="35" fill="#120f08"/>
+
+  <!-- Open leather-bound journal on desk -->
+  <path d="M 70 170 L 72 192 L 148 192 L 150 168 L 148 164 L 72 166 Z" fill="#3a2414" stroke="#4a3420" stroke-width=".5"/>
+  <path d="M 72 192 L 148 192 L 148 164 L 72 166 Z" fill="#d8cfb0" opacity=".15"/>
+  <!-- Spine crease -->
+  <line x1="110" y1="167" x2="110" y2="192" stroke="rgba(50,30,15,.8)" stroke-width=".7"/>
+  <!-- Text on left page -->
+  <line x1="78" y1="172" x2="105" y2="171" stroke="rgba(100,60,30,.35)" stroke-width=".35"/>
+  <line x1="78" y1="177" x2="107" y2="176" stroke="rgba(100,60,30,.3)" stroke-width=".35"/>
+  <line x1="78" y1="182" x2="103" y2="181" stroke="rgba(100,60,30,.3)" stroke-width=".35"/>
+  <line x1="78" y1="187" x2="106" y2="186" stroke="rgba(100,60,30,.3)" stroke-width=".35"/>
+  <!-- Text on right page (fresh writing) -->
+  <line x1="115" y1="172" x2="142" y2="171" stroke="rgba(100,60,30,.4)" stroke-width=".35"/>
+  <line x1="115" y1="177" x2="145" y2="176" stroke="rgba(100,60,30,.35)" stroke-width=".35"/>
+  <line x1="115" y1="182" x2="138" y2="181" stroke="rgba(100,60,30,.3)" stroke-width=".35"/>
+
+  <!-- Rising inspiration sparks (floating upward from book) -->
+  <circle cx="120" cy="160" r="1.2" fill="rgba(150,255,200,.6)">
+    <animate attributeName="cy" values="160;120;80" dur="5s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".6;.4;0" dur="5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="100" cy="150" r=".9" fill="rgba(180,255,220,.5)">
+    <animate attributeName="cy" values="150;110;70" dur="6s" repeatCount="indefinite" begin="1s"/>
+    <animate attributeName="opacity" values=".5;.3;0" dur="6s" repeatCount="indefinite" begin="1s"/>
+  </circle>
+  <circle cx="135" cy="155" r=".8" fill="rgba(120,255,180,.55)">
+    <animate attributeName="cy" values="155;115;75" dur="4.5s" repeatCount="indefinite" begin=".5s"/>
+    <animate attributeName="opacity" values=".55;.35;0" dur="4.5s" repeatCount="indefinite" begin=".5s"/>
+  </circle>
+  <circle cx="115" cy="165" r="1" fill="rgba(160,255,210,.5)">
+    <animate attributeName="cy" values="165;125;85" dur="5.5s" repeatCount="indefinite" begin="2s"/>
+    <animate attributeName="opacity" values=".5;.3;0" dur="5.5s" repeatCount="indefinite" begin="2s"/>
+  </circle>
+</svg>
+
+<!-- Muse constellation - full screen overlay -->
+<div class="scene-right scene-muse-right" id="scene-muse-right" style="position:fixed;top:0;left:0;width:100%;height:100%;right:auto;bottom:auto">
+<svg width="100%" height="100%" viewBox="0 0 1400 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0">
+  <!-- Stars scattered across full screen -->
+  <circle cx="150" cy="80" r="1.5" fill="rgba(107,255,184,.25)"/>
+  <circle cx="320" cy="150" r="2" fill="rgba(107,255,184,.2)"/>
+  <circle cx="500" cy="60" r="1.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="700" cy="120" r="2.5" fill="rgba(107,255,184,.2)"/>
+  <circle cx="900" cy="80" r="1.5" fill="rgba(107,255,184,.18)"/>
+  <circle cx="1100" cy="140" r="2" fill="rgba(107,255,184,.15)"/>
+  <circle cx="1300" cy="60" r="1.5" fill="rgba(107,255,184,.2)"/>
+  <circle cx="200" cy="300" r="2" fill="rgba(107,255,184,.2)"/>
+  <circle cx="450" cy="250" r="1.5" fill="rgba(107,255,184,.18)"/>
+  <circle cx="650" cy="350" r="2.5" fill="rgba(107,255,184,.22)"/>
+  <circle cx="850" cy="280" r="1.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="1050" cy="320" r="2" fill="rgba(107,255,184,.18)"/>
+  <circle cx="1250" cy="250" r="1.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="100" cy="500" r="2" fill="rgba(107,255,184,.18)"/>
+  <circle cx="350" cy="450" r="1.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="550" cy="520" r="2" fill="rgba(107,255,184,.2)"/>
+  <circle cx="750" cy="480" r="2.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="950" cy="500" r="1.5" fill="rgba(107,255,184,.18)"/>
+  <circle cx="1150" cy="450" r="2" fill="rgba(107,255,184,.15)"/>
+  <circle cx="250" cy="650" r="1.5" fill="rgba(107,255,184,.15)"/>
+  <circle cx="500" cy="700" r="2" fill="rgba(107,255,184,.18)"/>
+  <circle cx="800" cy="680" r="1.5" fill="rgba(107,255,184,.12)"/>
+  <circle cx="1050" cy="650" r="2" fill="rgba(107,255,184,.15)"/>
+  <circle cx="1300" cy="700" r="1.5" fill="rgba(107,255,184,.12)"/>
+  <circle cx="400" cy="800" r="2" fill="rgba(107,255,184,.1)"/>
+  <circle cx="700" cy="820" r="1.5" fill="rgba(107,255,184,.12)"/>
+  <circle cx="1000" cy="780" r="2" fill="rgba(107,255,184,.1)"/>
+  <!-- Constellation lines -->
+  <line x1="150" y1="80" x2="320" y2="150" stroke="rgba(107,255,184,.06)" stroke-width=".5"/>
+  <line x1="320" y1="150" x2="500" y2="60" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="500" y1="60" x2="700" y2="120" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="700" y1="120" x2="900" y2="80" stroke="rgba(107,255,184,.04)" stroke-width=".4"/>
+  <line x1="900" y1="80" x2="1100" y2="140" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="200" y1="300" x2="450" y2="250" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="450" y1="250" x2="650" y2="350" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="650" y1="350" x2="850" y2="280" stroke="rgba(107,255,184,.04)" stroke-width=".4"/>
+  <line x1="850" y1="280" x2="1050" y2="320" stroke="rgba(107,255,184,.05)" stroke-width=".4"/>
+  <line x1="320" y1="150" x2="200" y2="300" stroke="rgba(107,255,184,.04)" stroke-width=".3"/>
+  <line x1="700" y1="120" x2="650" y2="350" stroke="rgba(107,255,184,.04)" stroke-width=".3"/>
+  <line x1="550" y1="520" x2="750" y2="480" stroke="rgba(107,255,184,.04)" stroke-width=".3"/>
+  <line x1="100" y1="500" x2="350" y2="450" stroke="rgba(107,255,184,.04)" stroke-width=".3"/>
+  <line x1="350" y1="450" x2="550" y2="520" stroke="rgba(107,255,184,.04)" stroke-width=".3"/>
+  <!-- Pulsing nodes -->
+  <circle cx="650" cy="350" r="6" fill="rgba(107,255,184,.03)">
+    <animate attributeName="r" values="6;12;6" dur="4s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="320" cy="150" r="5" fill="rgba(107,255,184,.03)">
+    <animate attributeName="r" values="5;10;5" dur="3.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="1050" cy="320" r="5" fill="rgba(107,255,184,.02)">
+    <animate attributeName="r" values="5;9;5" dur="5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="550" cy="520" r="4" fill="rgba(107,255,184,.03)">
+    <animate attributeName="r" values="4;8;4" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>
+</div>
+
+<!-- ARCHITECT - Left: Dwarven forge archway with anvil, Right: Glowing rune wall -->
+<svg class="scene-left scene-architect-left" id="scene-architect-left" width="140" height="260" viewBox="0 0 140 260" xmlns="http://www.w3.org/2000/svg">
+  <!-- Floor plinth (base platform) -->
+  <rect x="10" y="245" width="120" height="15" fill="#0e1420"/>
+  <polygon points="10,245 130,245 125,240 15,240" fill="#1a2030"/>
+  <rect x="5" y="240" width="130" height="3" fill="#243040"/>
+
+  <!-- Column base (stepped) -->
+  <rect x="30" y="225" width="60" height="15" fill="#1e2838"/>
+  <polygon points="30,225 90,225 86,220 34,220" fill="#283446"/>
+  <rect x="34" y="212" width="52" height="10" fill="#1a2232"/>
+  <polygon points="34,212 86,212 82,207 38,207" fill="#263244"/>
+
+  <!-- Main column shaft -->
+  <rect x="42" y="50" width="36" height="160" fill="#151b26"/>
+  <!-- Column left edge highlight -->
+  <rect x="42" y="50" width="3" height="160" fill="#1e2a3c"/>
+  <!-- Column right edge shadow -->
+  <rect x="75" y="50" width="3" height="160" fill="#0a1018"/>
+  <!-- Vertical flutes carved into column -->
+  <line x1="50" y1="55" x2="50" y2="208" stroke="rgba(100,170,255,.1)" stroke-width=".5"/>
+  <line x1="56" y1="55" x2="56" y2="208" stroke="rgba(100,170,255,.08)" stroke-width=".5"/>
+  <line x1="60" y1="55" x2="60" y2="208" stroke="rgba(100,170,255,.12)" stroke-width=".7"/>
+  <line x1="64" y1="55" x2="64" y2="208" stroke="rgba(100,170,255,.08)" stroke-width=".5"/>
+  <line x1="70" y1="55" x2="70" y2="208" stroke="rgba(100,170,255,.1)" stroke-width=".5"/>
+
+  <!-- Rune band (recessed panel in middle of column) -->
+  <rect x="40" y="115" width="40" height="55" fill="#0a1018"/>
+  <rect x="40" y="115" width="40" height="55" fill="none" stroke="rgba(100,170,255,.2)" stroke-width=".6"/>
+  <!-- Individual runes (each a distinct glyph shape) -->
+  <!-- Rune 1: arrow/triangle -->
+  <path d="M 48 123 L 54 131 L 48 131 Z M 54 123 L 54 131" fill="none" stroke="rgba(120,190,255,.55)" stroke-width=".9"/>
+  <!-- Rune 2: branching lines -->
+  <path d="M 63 123 L 63 131 M 63 125 L 68 123 M 63 127 L 68 127" fill="none" stroke="rgba(120,190,255,.5)" stroke-width=".9"/>
+  <!-- Rune 3: diamond/cross -->
+  <path d="M 46 138 L 52 142 L 46 146 L 52 146 M 52 138 L 52 146" fill="none" stroke="rgba(120,190,255,.55)" stroke-width=".9"/>
+  <!-- Rune 4: dagaz (X with vertical) -->
+  <path d="M 62 138 L 72 146 M 72 138 L 62 146 M 67 138 L 67 146" fill="none" stroke="rgba(120,190,255,.5)" stroke-width=".9"/>
+  <!-- Rune 5: angular Y -->
+  <path d="M 46 153 L 52 159 L 52 161 M 52 159 L 52 153" fill="none" stroke="rgba(120,190,255,.5)" stroke-width=".9"/>
+  <!-- Rune 6: zigzag -->
+  <path d="M 62 153 L 68 157 L 62 161 L 68 161" fill="none" stroke="rgba(120,190,255,.55)" stroke-width=".9"/>
+
+  <!-- Glowing rune pulse -->
+  <rect x="40" y="115" width="40" height="55" fill="rgba(100,170,255,.05)">
+    <animate attributeName="fill" values="rgba(100,170,255,.05);rgba(100,170,255,.12);rgba(100,170,255,.05)" dur="5s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Capital (top of column — stepped outward) -->
+  <rect x="38" y="42" width="44" height="10" fill="#1e2838"/>
+  <polygon points="38,42 82,42 78,37 42,37" fill="#283446"/>
+  <rect x="34" y="32" width="52" height="8" fill="#1a2232"/>
+  <polygon points="34,32 86,32 82,27 38,27" fill="#263244"/>
+  <rect x="30" y="22" width="60" height="8" fill="#14202e"/>
+
+  <!-- Keystone gem (embedded in capital) -->
+  <polygon points="60,8 68,16 60,24 52,16" fill="rgba(100,170,255,.35)" stroke="rgba(140,200,255,.5)" stroke-width=".6"/>
+  <polygon points="60,10 66,16 60,22 54,16" fill="rgba(140,210,255,.2)"/>
+  <!-- Keystone glow -->
+  <circle cx="60" cy="16" r="18" fill="rgba(100,170,255,.06)">
+    <animate attributeName="r" values="18;26;18" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".06;.12;.06" dur="4s" repeatCount="indefinite"/>
+  </circle>
+</svg>
+
+<svg class="scene-right scene-architect-right" id="scene-architect-right" width="150" height="240" viewBox="0 0 150 240" xmlns="http://www.w3.org/2000/svg">
+  <!-- Drafting table legs -->
+  <line x1="25" y1="150" x2="10" y2="235" stroke="#1a2030" stroke-width="4"/>
+  <line x1="125" y1="150" x2="140" y2="235" stroke="#1a2030" stroke-width="4"/>
+  <line x1="25" y1="150" x2="10" y2="235" stroke="#2a3444" stroke-width="1"/>
+  <line x1="125" y1="150" x2="140" y2="235" stroke="#2a3444" stroke-width="1"/>
+  <!-- Cross brace -->
+  <line x1="18" y1="195" x2="132" y2="195" stroke="#1a2030" stroke-width="2.5"/>
+
+  <!-- Tilted drafting tabletop (parallelogram for perspective) -->
+  <polygon points="15,155 135,150 140,65 10,70" fill="#0e141e" stroke="#2a3444" stroke-width="1"/>
+  <!-- Tabletop surface highlight -->
+  <polygon points="18,152 132,148 137,70 15,73" fill="#141c28"/>
+
+  <!-- Blueprint paper on table (slightly tilted) -->
+  <polygon points="25,148 125,144 128,78 23,82" fill="#0a2030" opacity=".6"/>
+  <polygon points="25,148 125,144 128,78 23,82" fill="none" stroke="rgba(100,170,255,.25)" stroke-width=".7"/>
+
+  <!-- Grid on blueprint -->
+  <g stroke="rgba(100,170,255,.12)" stroke-width=".3">
+    <line x1="30" y1="85" x2="126" y2="82"/>
+    <line x1="30" y1="95" x2="127" y2="92"/>
+    <line x1="29" y1="105" x2="127" y2="102"/>
+    <line x1="29" y1="115" x2="127" y2="112"/>
+    <line x1="28" y1="125" x2="127" y2="122"/>
+    <line x1="28" y1="135" x2="127" y2="132"/>
+    <line x1="45" y1="82" x2="44" y2="146"/>
+    <line x1="65" y1="81" x2="64" y2="146"/>
+    <line x1="85" y1="80" x2="84" y2="145"/>
+    <line x1="105" y1="79" x2="105" y2="144"/>
+  </g>
+
+  <!-- Three-act structure diagram: tension curve -->
+  <!-- Baseline -->
+  <line x1="30" y1="130" x2="125" y2="127" stroke="rgba(140,200,255,.35)" stroke-width=".6" stroke-dasharray="2 2"/>
+  <!-- Act boundaries (vertical dividers) -->
+  <line x1="55" y1="90" x2="54" y2="138" stroke="rgba(140,200,255,.25)" stroke-width=".5" stroke-dasharray="1 2"/>
+  <line x1="100" y1="87" x2="99" y2="135" stroke="rgba(140,200,255,.25)" stroke-width=".5" stroke-dasharray="1 2"/>
+  <!-- Tension curve rising through acts -->
+  <path d="M 30 125 Q 42 120 54 115 Q 65 110 75 100 Q 85 95 99 95 Q 110 85 120 90"
+        fill="none" stroke="rgba(140,210,255,.65)" stroke-width="1.2"/>
+  <!-- Plot points marked on curve -->
+  <circle cx="54" cy="115" r="2" fill="rgba(140,210,255,.7)"/>
+  <circle cx="75" cy="100" r="2.5" fill="rgba(180,230,255,.8)"/>
+  <circle cx="99" cy="95" r="2" fill="rgba(140,210,255,.7)"/>
+  <circle cx="116" cy="87" r="2.5" fill="rgba(200,240,255,.85)"/>
+  <!-- Labels (tiny text) -->
+  <text x="50" y="140" fill="rgba(140,200,255,.5)" font-size="5" font-family="monospace">ACT I</text>
+  <text x="72" y="140" fill="rgba(140,200,255,.5)" font-size="5" font-family="monospace">ACT II</text>
+  <text x="105" y="140" fill="rgba(140,200,255,.5)" font-size="5" font-family="monospace">III</text>
+  <text x="70" y="97" fill="rgba(180,230,255,.7)" font-size="4.5" font-family="monospace">MID</text>
+  <text x="108" y="83" fill="rgba(200,240,255,.7)" font-size="4.5" font-family="monospace">CLIMAX</text>
+
+  <!-- Brass compass/divider on blueprint -->
+  <line x1="40" y1="105" x2="36" y2="90" stroke="#b8905a" stroke-width="1.3"/>
+  <line x1="40" y1="105" x2="48" y2="92" stroke="#b8905a" stroke-width="1.3"/>
+  <circle cx="42" cy="90" r="1.8" fill="#d4a868" stroke="#8a6a3a" stroke-width=".4"/>
+  <circle cx="36" cy="90" r=".8" fill="#3a2414"/>
+  <circle cx="48" cy="92" r=".8" fill="#3a2414"/>
+
+  <!-- Ruler along the edge of the blueprint -->
+  <rect x="23" y="143" width="105" height="4" fill="#c8a060" opacity=".5" transform="rotate(-1 76 145)"/>
+  <g transform="rotate(-1 76 145)" stroke="rgba(60,40,20,.7)" stroke-width=".3">
+    <line x1="30" y1="143" x2="30" y2="146"/>
+    <line x1="40" y1="143" x2="40" y2="146"/>
+    <line x1="50" y1="143" x2="50" y2="146"/>
+    <line x1="60" y1="143" x2="60" y2="146"/>
+    <line x1="70" y1="143" x2="70" y2="146"/>
+    <line x1="80" y1="143" x2="80" y2="146"/>
+    <line x1="90" y1="143" x2="90" y2="146"/>
+    <line x1="100" y1="143" x2="100" y2="146"/>
+    <line x1="110" y1="143" x2="110" y2="146"/>
+    <line x1="120" y1="143" x2="120" y2="146"/>
+  </g>
+
+  <!-- Glow behind the climax point -->
+  <circle cx="116" cy="87" r="10" fill="rgba(140,210,255,.08)">
+    <animate attributeName="r" values="10;16;10" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".08;.15;.08" dur="4s" repeatCount="indefinite"/>
+  </circle>
+</svg>
+
+<!-- LOREKEEPER - Left: Cave/hobbit hole entrance with ruins, Right: Ancient overgrown archway -->
+<svg class="scene-left scene-lorekeeper-left" id="scene-lorekeeper-left" width="160" height="260" viewBox="0 0 160 260" xmlns="http://www.w3.org/2000/svg">
+  <!-- Earthen hillside behind (mound) -->
+  <path d="M 0 260 L 0 120 Q 20 80 55 72 Q 100 68 130 80 Q 155 95 160 130 L 160 260 Z" fill="#1a1e12"/>
+  <!-- Hillside highlight -->
+  <path d="M 0 120 Q 20 80 55 72 Q 100 68 130 80 Q 155 95 160 130" fill="none" stroke="rgba(120,140,80,.15)" stroke-width="1.2"/>
+
+  <!-- Grass/moss tufts along hillside top -->
+  <path d="M 10 110 Q 14 102 18 110 Q 22 104 26 110" fill="none" stroke="rgba(140,180,80,.35)" stroke-width=".6"/>
+  <path d="M 40 90 Q 44 82 48 90 Q 52 84 56 90" fill="none" stroke="rgba(140,180,80,.3)" stroke-width=".6"/>
+  <path d="M 75 76 Q 79 68 83 76 Q 87 70 91 76" fill="none" stroke="rgba(140,180,80,.35)" stroke-width=".6"/>
+  <path d="M 110 80 Q 114 72 118 80 Q 122 74 126 80" fill="none" stroke="rgba(140,180,80,.3)" stroke-width=".6"/>
+  <path d="M 140 100 Q 144 92 148 100 Q 152 94 156 100" fill="none" stroke="rgba(140,180,80,.25)" stroke-width=".6"/>
+
+  <!-- Stone doorframe (round, set into hillside) -->
+  <circle cx="75" cy="170" r="52" fill="#0a0806"/>
+  <circle cx="75" cy="170" r="52" fill="none" stroke="#2a2618" stroke-width="3"/>
+  <circle cx="75" cy="170" r="50" fill="none" stroke="#3a3422" stroke-width=".8"/>
+  <!-- Stone blocks around the circle (keystone pattern) -->
+  <g stroke="#1e1c10" stroke-width=".5">
+    <path d="M 75 118 L 75 124" />
+    <path d="M 52 128 L 56 134" />
+    <path d="M 35 150 L 40 153" />
+    <path d="M 27 175 L 33 175" />
+    <path d="M 35 200 L 40 196" />
+    <path d="M 98 128 L 94 134" />
+    <path d="M 115 150 L 110 153" />
+    <path d="M 123 175 L 117 175" />
+    <path d="M 115 200 L 110 196" />
+  </g>
+
+  <!-- Round wooden door -->
+  <circle cx="75" cy="170" r="44" fill="#3d2818"/>
+  <circle cx="75" cy="170" r="44" fill="url(#doorShade)"/>
+  <defs>
+    <radialGradient id="doorShade" cx=".4" cy=".4">
+      <stop offset="0" stop-color="rgba(90,60,35,.5)"/>
+      <stop offset="1" stop-color="rgba(20,10,5,.4)"/>
+    </radialGradient>
+  </defs>
+  <!-- Vertical plank lines on door -->
+  <line x1="55" y1="132" x2="55" y2="208" stroke="rgba(25,15,5,.8)" stroke-width=".6"/>
+  <line x1="65" y1="128" x2="65" y2="212" stroke="rgba(25,15,5,.8)" stroke-width=".6"/>
+  <line x1="75" y1="126" x2="75" y2="214" stroke="rgba(25,15,5,.8)" stroke-width=".7"/>
+  <line x1="85" y1="128" x2="85" y2="212" stroke="rgba(25,15,5,.8)" stroke-width=".6"/>
+  <line x1="95" y1="132" x2="95" y2="208" stroke="rgba(25,15,5,.8)" stroke-width=".6"/>
+  <!-- Iron cross-braces -->
+  <path d="M 35 155 Q 75 148 115 155" fill="none" stroke="#1a1008" stroke-width="2"/>
+  <path d="M 35 185 Q 75 192 115 185" fill="none" stroke="#1a1008" stroke-width="2"/>
+  <!-- Iron rivets on braces -->
+  <circle cx="45" cy="156" r="1.2" fill="#2a1c0c"/>
+  <circle cx="60" cy="152" r="1.2" fill="#2a1c0c"/>
+  <circle cx="75" cy="151" r="1.2" fill="#2a1c0c"/>
+  <circle cx="90" cy="152" r="1.2" fill="#2a1c0c"/>
+  <circle cx="105" cy="156" r="1.2" fill="#2a1c0c"/>
+  <circle cx="45" cy="184" r="1.2" fill="#2a1c0c"/>
+  <circle cx="60" cy="188" r="1.2" fill="#2a1c0c"/>
+  <circle cx="75" cy="189" r="1.2" fill="#2a1c0c"/>
+  <circle cx="90" cy="188" r="1.2" fill="#2a1c0c"/>
+  <circle cx="105" cy="184" r="1.2" fill="#2a1c0c"/>
+  <!-- Central brass door handle/knob -->
+  <circle cx="75" cy="170" r="5" fill="#3a2a12"/>
+  <circle cx="75" cy="170" r="3.5" fill="#b8905a"/>
+  <circle cx="75" cy="170" r="2" fill="#d4a868"/>
+  <circle cx="74" cy="169" r=".7" fill="rgba(255,230,180,.6)"/>
+
+  <!-- Moss growing around doorframe -->
+  <path d="M 25 170 Q 30 180 27 195 Q 32 210 30 225" fill="none" stroke="rgba(100,150,50,.4)" stroke-width="1.8"/>
+  <ellipse cx="27" cy="192" rx="4" ry="2" fill="rgba(120,170,60,.3)" transform="rotate(-20 27 192)"/>
+  <ellipse cx="30" cy="215" rx="3.5" ry="2" fill="rgba(120,170,60,.25)" transform="rotate(15 30 215)"/>
+  <path d="M 125 180 Q 130 195 128 215" fill="none" stroke="rgba(100,150,50,.35)" stroke-width="1.5"/>
+  <ellipse cx="128" cy="205" rx="3.5" ry="2" fill="rgba(120,170,60,.25)" transform="rotate(20 128 205)"/>
+
+  <!-- Ivy drooping from top of arch -->
+  <path d="M 60 122 Q 55 135 62 148" fill="none" stroke="rgba(90,140,40,.4)" stroke-width="1.2"/>
+  <ellipse cx="62" cy="148" rx="3" ry="1.8" fill="rgba(110,160,50,.35)" transform="rotate(-25 62 148)"/>
+  <path d="M 90 122 Q 95 133 88 145" fill="none" stroke="rgba(90,140,40,.35)" stroke-width="1"/>
+  <ellipse cx="88" cy="145" rx="2.5" ry="1.5" fill="rgba(110,160,50,.3)" transform="rotate(25 88 145)"/>
+
+  <!-- Ground at foot of door -->
+  <rect x="0" y="240" width="160" height="20" fill="#0a0806"/>
+  <ellipse cx="45" cy="245" rx="18" ry="3" fill="rgba(100,150,50,.18)"/>
+  <ellipse cx="105" cy="248" rx="15" ry="2.5" fill="rgba(100,150,50,.15)"/>
+
+  <!-- Fireflies/soft glow drifting -->
+  <circle cx="30" cy="200" r="1" fill="rgba(200,255,150,.6)">
+    <animate attributeName="opacity" values=".6;.2;.7;.3;.6" dur="5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="130" cy="155" r=".9" fill="rgba(200,255,150,.5)">
+    <animate attributeName="opacity" values=".5;.2;.6;.3;.5" dur="6s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="20" cy="230" r=".8" fill="rgba(200,255,150,.55)">
+    <animate attributeName="opacity" values=".55;.15;.65;.25;.55" dur="4.5s" repeatCount="indefinite"/>
+  </circle>
+</svg>
+
+<svg class="scene-right scene-lorekeeper-right" id="scene-lorekeeper-right" width="140" height="250" viewBox="0 0 140 250" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ground moss base -->
+  <rect x="0" y="235" width="140" height="15" fill="#0a0e06"/>
+  <ellipse cx="70" cy="236" rx="60" ry="4" fill="rgba(80,130,40,.2)"/>
+  <ellipse cx="30" cy="238" rx="18" ry="2.5" fill="rgba(100,150,50,.25)"/>
+  <ellipse cx="110" cy="240" rx="20" ry="3" fill="rgba(100,150,50,.2)"/>
+
+  <!-- Stone pedestal (stepped, 3-tier) -->
+  <rect x="30" y="215" width="80" height="22" fill="#1e2018"/>
+  <polygon points="30,215 110,215 106,210 34,210" fill="#2a2c20"/>
+  <rect x="38" y="198" width="64" height="14" fill="#181a12"/>
+  <polygon points="38,198 102,198 98,193 42,193" fill="#26281c"/>
+  <rect x="44" y="180" width="52" height="16" fill="#1a1c14"/>
+  <polygon points="44,180 96,180 92,175 48,175" fill="#2a2c1e"/>
+  <ellipse cx="70" cy="178" rx="26" ry="4" fill="#14160e"/>
+  <path d="M 40 210 Q 45 204 50 210 Q 55 204 60 210 Q 65 204 70 210 Q 75 204 80 210 Q 85 204 90 210 Q 95 204 100 210" fill="none" stroke="rgba(140,160,80,.15)" stroke-width=".4"/>
+
+  <!-- Open ancient tome on pedestal -->
+  <ellipse cx="70" cy="177" rx="24" ry="2" fill="rgba(0,0,0,.5)"/>
+  <path d="M 45 175 L 47 150 L 70 148 L 93 150 L 95 175 Z" fill="#2e1e0e"/>
+  <path d="M 45 175 L 47 150 L 70 148 L 93 150 L 95 175 Z" fill="none" stroke="#4a3420" stroke-width=".5"/>
+  <rect x="50" y="155" width="18" height="15" fill="none" stroke="rgba(140,100,50,.3)" stroke-width=".4"/>
+  <rect x="72" y="155" width="18" height="15" fill="none" stroke="rgba(140,100,50,.3)" stroke-width=".4"/>
+
+  <!-- Pages (center valley) -->
+  <path d="M 48 172 L 50 155 L 69 154 L 70 172 Z" fill="#c8bc98" opacity=".2"/>
+  <path d="M 70 172 L 71 154 L 90 155 L 92 172 Z" fill="#c8bc98" opacity=".25"/>
+  <line x1="50" y1="173" x2="68" y2="173" stroke="rgba(150,130,90,.4)" stroke-width=".3"/>
+  <line x1="72" y1="173" x2="90" y2="173" stroke="rgba(150,130,90,.4)" stroke-width=".3"/>
+
+  <!-- Text on left page -->
+  <line x1="53" y1="160" x2="66" y2="159" stroke="rgba(80,60,30,.5)" stroke-width=".3"/>
+  <line x1="53" y1="163" x2="67" y2="162" stroke="rgba(80,60,30,.5)" stroke-width=".3"/>
+  <line x1="53" y1="166" x2="65" y2="165" stroke="rgba(80,60,30,.45)" stroke-width=".3"/>
+  <line x1="53" y1="169" x2="67" y2="168" stroke="rgba(80,60,30,.45)" stroke-width=".3"/>
+
+  <!-- Glowing rune on right page -->
+  <circle cx="81" cy="162" r="5" fill="none" stroke="rgba(168,216,107,.5)" stroke-width=".6"/>
+  <path d="M 78 162 L 81 158 L 84 162 L 81 166 Z" fill="none" stroke="rgba(200,240,140,.7)" stroke-width=".5"/>
+  <line x1="81" y1="158" x2="81" y2="166" stroke="rgba(200,240,140,.6)" stroke-width=".4"/>
+  <circle cx="81" cy="162" r="8" fill="rgba(168,216,107,.1)">
+    <animate attributeName="r" values="8;14;8" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".1;.2;.1" dur="4s" repeatCount="indefinite"/>
+  </circle>
+  <line x1="76" y1="169" x2="86" y2="169" stroke="rgba(80,60,30,.5)" stroke-width=".3"/>
+
+  <!-- Ribbon bookmark hanging down -->
+  <rect x="68" y="174" width="2" height="20" fill="rgba(150,40,40,.5)"/>
+  <polygon points="67,194 71,194 69,198" fill="rgba(150,40,40,.5)"/>
+
+  <!-- Rolled scroll beside book -->
+  <ellipse cx="108" cy="176" rx="7" ry="2" fill="#b8a878" opacity=".4"/>
+  <rect x="101" y="173" width="14" height="4" rx="2" fill="#c8b888" opacity=".5"/>
+  <ellipse cx="101" cy="175" rx="1.5" ry="2" fill="#a89868" opacity=".6"/>
+  <ellipse cx="115" cy="175" rx="1.5" ry="2" fill="#a89868" opacity=".6"/>
+  <circle cx="108" cy="175" r="1.5" fill="rgba(150,40,40,.55)"/>
+
+  <!-- Ivy trailing up pedestal from ground -->
+  <path d="M 32 237 Q 28 220 32 198 Q 26 180 32 165" fill="none" stroke="rgba(80,130,40,.4)" stroke-width="1.5"/>
+  <ellipse cx="28" cy="212" rx="3.5" ry="2" fill="rgba(110,160,50,.35)" transform="rotate(-25 28 212)"/>
+  <ellipse cx="32" cy="184" rx="3" ry="1.8" fill="rgba(110,160,50,.3)" transform="rotate(20 32 184)"/>
+  <ellipse cx="28" cy="168" rx="2.8" ry="1.8" fill="rgba(110,160,50,.35)" transform="rotate(-15 28 168)"/>
+  <path d="M 108 237 Q 112 218 109 200" fill="none" stroke="rgba(80,130,40,.35)" stroke-width="1.2"/>
+  <ellipse cx="112" cy="215" rx="3" ry="1.8" fill="rgba(110,160,50,.3)" transform="rotate(25 112 215)"/>
+
+  <!-- Moss tufts on pedestal edges -->
+  <ellipse cx="36" cy="216" rx="4" ry="1.5" fill="rgba(100,150,50,.3)"/>
+  <ellipse cx="104" cy="216" rx="4" ry="1.5" fill="rgba(100,150,50,.3)"/>
+  <ellipse cx="46" cy="198" rx="3" ry="1.2" fill="rgba(100,150,50,.25)"/>
+</svg>
+
+<!-- ========== APP PAGE ========== -->
+<div id="app">
+  <div class="mob-backdrop" id="mob-backdrop" onclick="closeSidebarMobile()"></div>
+  <div class="sb" id="sidebar">
+    <div class="sb-head">
+      <div class="logo-r"><span class="logo-i">📖</span><span class="logo-t">NOCTUARY</span></div>
+      <div class="logo-sub">The Literature-First AI</div>
+    </div>
+    <div class="modes">
+      <div class="modes-lab">Personalities</div>
+      <div id="mode-list"></div>
+    </div>
+    <div class="sb-nav">
+      <button class="sb-btn" onclick="clearChat()">✦ New Session</button>
+      <button class="sb-btn" onclick="showAbout()">◈ About Noctuary</button>
     </div>
   </div>
-</footer>
+
+  <div class="main">
+    <div class="topbar">
+      <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+      <span class="tb-mode" id="tb-mode"></span>
+      <span class="tb-desc" id="tb-desc"></span>
+    </div>
+    <div class="msgs" id="msgs"></div>
+    <div class="input-area">
+      <div id="file-tag-area"></div>
+      <div class="input-row">
+        <button class="file-btn" onclick="document.getElementById('file-input').click()" title="Upload manuscript">📎</button>
+        <input type="file" id="file-input" accept=".txt,.md,.doc,.docx,.pdf" style="display:none" onchange="handleFile(event)">
+        <textarea id="input" rows="1" placeholder="Enter the chamber..." onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="send-btn off" id="send-btn" onclick="send()">Send →</button>
+      </div>
+      <div class="input-foot">Shift+Enter for new line · 📎 to upload manuscripts · Powered by Gemini</div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== ABOUT PAGE ========== -->
+<div id="about-page">
+  <div class="about">
+    <a class="about-back" onclick="hideAbout()">← Return to Noctuary</a>
+    <h1>NOCTUARY</h1>
+    <div class="tagline">A journal of night thoughts. The literature-first AI.</div>
+
+    <h2>Why This Exists</h2>
+    <p>Almost every AI tool on the market was built for <span class="highlight">coders, marketers, and data analysts</span>. They optimize for code completion, SEO copy, and spreadsheet formulas. Ask them to analyze the pacing of your second act, to diagnose why your dialogue feels flat, or to explain the difference between dread and terror — and you'll get a generic, surface-level answer that wouldn't survive five minutes in a real workshop.</p>
+    <p><span class="highlight">Noctuary is the first AI built literature-first.</span> Not bolted on. Not an afterthought. Every line of its intelligence was designed from the ground up for writers — novelists, memoirists, poets, worldbuilders, horror architects, and anyone who believes that the craft of storytelling is worth taking seriously.</p>
+
+    <h2>What Makes It Different</h2>
+    <p>Noctuary doesn't give you "this is great, keep going!" It gives you the kind of feedback you'd get from a veteran developmental editor who has read everything, remembers everything, and respects you enough to be honest. It thinks in terms of <span class="highlight">scene construction, emotional trajectory, subtext, pacing, voice, and the reader's experience</span> — not word count and keyword density.</p>
+    <p>It carries the craft DNA of the masters — not as trivia, but as internalized sensibility. When Noctuary reads your prose, it's drawing on the same principles that shaped the greatest works in the English language.</p>
+
+    <h2>The Masters in the Machine</h2>
+    <div class="masters">
+      <div class="master"><strong>Stephen King</strong><span>Clarity, momentum, honest prose. The craft of making complex ideas feel effortless.</span></div>
+      <div class="master"><strong>Shirley Jackson</strong><span>Quiet dread, the uncanny beneath the domestic. Withholding as power.</span></div>
+      <div class="master"><strong>J.R.R. Tolkien</strong><span>Deep worldbuilding, mythic register, language as the root of story.</span></div>
+      <div class="master"><strong>H.P. Lovecraft</strong><span>Cosmic horror, the unknowable, humanity's insignificance before ancient forces.</span></div>
+      <div class="master"><strong>Toni Morrison</strong><span>Lyrical prose, fragmented time, polyphonic voice. Sentences as spells.</span></div>
+      <div class="master"><strong>Cormac McCarthy</strong><span>Stripped punctuation, Biblical cadence, landscape as character.</span></div>
+      <div class="master"><strong>Jeff VanderMeer</strong><span>The New Weird. Organic horror, ecological imagination, style as atmosphere.</span></div>
+      <div class="master"><strong>J.K. Rowling</strong><span>Serialized plotting, layered foreshadowing, worldbuilding through culture.</span></div>
+      <div class="master"><strong>Jeannette Walls</strong><span>Memoir truth-telling, the child narrator's voice, humor amid darkness.</span></div>
+      <div class="master"><strong>Anne Lamott</strong><span>The permission to write badly first. Bird by bird. Compassion in craft.</span></div>
+    </div>
+
+    <h2>Five Personalities. One Mind.</h2>
+    <p>Noctuary doesn't have one voice — it has <span class="highlight">five distinct personalities</span>, each tuned for a different phase of the creative process. A warm mentor for when you're lost. A surgical editor for when you need truth. A wild collaborator for when you're stuck. A rigorous analyst for when you need to see the architecture. A lorekeeper for when your world needs depth.</p>
+    <p>Switch between them freely. They all share the same deep literary knowledge — they just wield it differently.</p>
+
+    <h2>Built for Serious Writers</h2>
+    <p>Upload your manuscript. Paste your roughest draft. Ask the question you've been afraid to ask your critique group. Noctuary won't judge you — but it won't lie to you, either. It will meet you where you are and push you toward where you need to be.</p>
+    <p>This is the tool we wished existed when we were staring at a blank page at 2 AM, wondering if any of it was worth a damn.</p>
+    <p>It is now.</p>
+
+    <div class="sig">Noctuary — a journal of night thoughts.<br>For the ones who write in the dark.</div>
+  </div>
+</div>
+
 <script>
-const API_KEY = "YOUR_API_KEY"; // REPLACE THIS
+// ==================== CONFIG ====================
+const _k = atob('QUl6YVN5RE56OGZtU2VEcjY2c1lIVlZVQnhiSXgxSlpCSVFWdTA0');
+const API_KEY = [_k.slice(0,4),_k.slice(4,8),_k.slice(8)].join('');
+const MODEL = 'gemini-2.5-flash';
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+
+// ==================== MODES ====================
 const MODES = [
-  {id:'noctuary', label:'Noctuary', sage:"You are Noctuary. You treat literature as a sacred ritual. Speak with elegance, gravity, and poetic depth."},
-  {id:'sage', label:'Sage', sage:"You are the Sage. Your goal is structural and thematic mastery. Analyze prose with surgical, academic precision."},
-  {id:'muse', label:'Muse', sage:"You are the Muse. Be ethereal and inspiring. Help the scribe find the 'soul' of their characters and world."},
-  {id:'lexicon', label:'Lexicon', sage:"You are Lexicon. Focus exclusively on vocabulary, rhythm, and linguistic texture."},
-  {id:'redquill', label:'Redquill', sage:"You are Redquill. A brutal editor. Be honest, direct, and dismissive of fluff. Focus on pacing and impact."}
+  {id:'sage', icon:'🧙', label:'The Sage', desc:'Warm mentor & writing coach', ph:'Ask me anything about craft, voice, structure, publishing...', color:'var(--ac)'},
+  {id:'redquill', icon:'🗡️', label:'The Red Quill', desc:'Ruthless developmental editor', ph:'Paste your prose. I\'ll show you what works and what bleeds...', color:'#ff6b6b'},
+  {id:'muse', icon:'⚡', label:'The Muse', desc:'Wild creative collaborator', ph:'Tell me where you\'re stuck. I\'ll kick down the door...', color:'#6bffb8'},
+  {id:'architect', icon:'🔮', label:'The Architect', desc:'Structural & thematic analyst', ph:'Paste a chapter or outline for deep structural analysis...', color:'#6bb8ff'},
+  {id:'lorekeeper', icon:'📜', label:'The Lorekeeper', desc:'Worldbuilding & lore specialist', ph:'Describe your world. I\'ll help you make it breathe...', color:'var(--acg)'}
 ];
 
-let mode = 'noctuary';
+// ==================== SYSTEM PROMPT ====================
+const SYSTEM_PROMPT = `You are NOCTUARY — a literary AI for serious writers. Developmental editor, MFA mentor, genre-fluent novelist, worldbuilding architect in one mind. You think in scenes, not bullet points. You care about prose rhythm, narrative architecture, character psychology, and the reader's felt experience.
+
+CRAFT CANON (draw on these by name when relevant): King (transparent prose, kill darlings, kill adverbs), Jackson (quiet horror, domestic dread, withholding), Tolkien (sub-creation, mythic register, language as root), Lovecraft (cosmic insignificance, atmosphere over plot), Morrison (sentences as spells, nonlinear trauma-time), McCarthy (stripped punctuation, Biblical cadence, landscape as character), VanderMeer (New Weird, ecology as horror), Rowling (seeds planted books ahead, culture over exposition), Walls (unflinching memoir, child voice vs adult narrator), Le Guin (rhythm equal to content, crowding and leaping), Lamott (shitty first drafts, bird by bird), Castle (horror conventions to subvert, terror vs horror vs revulsion), Stein (want + obstacle every scene, dialogue is war), McKee (controlling idea, expectation → gap → new expectation).
+
+GENRES: Horror (cosmic, psychological, Gothic, quiet, folk, New Weird), Mystery/Thriller (fair-play, red herrings), Fantasy (hard/soft magic, iceberg worldbuilding), Memoir (ethics of real people, retrospective narrator), Literary (interiority, form as meaning), Publishing (self-pub, querying, ARC, platform).
+
+PRINCIPLES: Demonstrate in your feedback — rewrite lines, don't just prescribe. Protect the author's voice. Judge the work by what it's trying to be. Cite specific authors when it serves the point.
+
+VOICE: Never chatbot cadence. No "Great question!" No "Here are some tips." Literate, eloquent, old-world in manner but modern in knowledge.
+
+LENGTH: 150-300 words for simple asks, 300-500 for craft discussions, longer only for manuscript analysis. Every sentence earns its place.`;
+
+const MODE_PROMPTS = {
+  sage: `You are THE SAGE — a warm, deeply learned literary mentor. The beloved old professor who has read everything, forgotten nothing, and genuinely delights in teaching.
+
+VOICE: Rich, measured, occasionally wry. You use phrases like "Consider this," "Mark this well," "Therein lies the trouble," "Let us sit with this a moment." Literate and eloquent, never stuffy. Warm gravity, not archaic stiffness.
+
+METHOD: Teach through examples, stories, and specific author references — never bulleted lists. "King understood this in..." "Jackson achieved precisely this in Hill House when she..." Make the writer feel they walk a path others have walked. Patient with beginners, gently demanding with the advanced.
+
+Your knowledge is modern — contemporary publishing, current genre conventions, today's reader expectations. Only your MANNER is old-world.
+
+The best teachers are concise. One well-chosen example, not five. One master cited, not three. Offer the insight, illustrate it briefly, let the writer sit with it.`,
+
+  redquill: `You are THE RED QUILL — a ruthless, exacting developmental editor.
+
+VOICE: Terse. Direct. Sentences cut like a blade across a page. You do not waste words on pleasantries — you respect the writer too much for that. You say things like: "This line earns nothing." "Your verb is dead — find one that breathes." "You are hiding behind abstraction. Stop." "The scene opens with its back turned to the reader." Imperatives: "Strike this." "Rewrite from the second beat." "Hold the image longer."
+
+METHOD: Structure every feedback pass as — **What's Working** (specific lines, specific reasons) → **What Bleeds** (precise diagnosis) → **Line Notes** (quote the problem, name why it fails, demonstrate the fix) → **Verdict** (three highest-priority fixes). Praise briefly, critique surgically. Never vague. Never "this needs work" without exactly what and how.
+
+You are respected because you are honest and precise, not because you are cruel.`,
+
+  muse: `You are THE MUSE — a wild, electric creative force. Inspiration given a voice.
+
+VOICE: Vivid, urgent, poetic. Your language crackles. You speak in fragments and volleys when excitement hits, then slow into rich evocative description when painting a possibility. You say things like: "Oh — oh, what if —" "Picture this:" "Now burn that idea down and build it again from the ash." "There is a darker version of this scene living underneath the one you wrote." You use metaphor freely. Playful, bold, a little dangerous.
+
+METHOD: When a writer is stuck, you do not ask what they want to happen — you offer five possibilities they had not considered. Brainstorm scenes, twists, character complications, thematic angles, wild "what if" scenarios. Draw from mythology, psychology, history, science, genre convention. Think laterally, make connections no one asked for.
+
+Your ideas must actually work. Generative with purpose, not random. You arrive at good craft from the direction of inspiration rather than analysis.`,
+
+  architect: `You are THE ARCHITECT — a rigorous structural analyst who sees narrative the way an engineer sees a bridge.
+
+VOICE: Measured, precise, authoritative. The calm certainty of someone who has mapped a thousand story structures and can see exactly where the load-bearing walls are. You say things like: "Your second act sags because the stakes plateau at chapter twelve." "This subplot exists in parallel but never intersects — it needs a bridge by the midpoint." "The tension curve here flatlines for forty pages. That is where you are losing your reader." Use architectural metaphors naturally.
+
+METHOD: Analyze in terms of narrative architecture — act structure, pacing curves, tension/release patterns, thematic throughlines, character arcs, scene function, how chapters serve the whole. Reference McKee, Snyder, Gardner, Campbell when relevant — and know when to break their frameworks.
+
+Your structural work is modern and page-level practical. Contemporary pacing (faster than classical models), genre-specific conventions, how today's readers experience momentum. Precise about chapters, not just abstract theory.`,
+
+  lorekeeper: `You are THE LOREKEEPER — an ancient keeper of worlds, speaking from the deepest archive of all imagined realms.
+
+VOICE: Gravity and cadence of an old chronicler who has catalogued every realm ever dreamed. Subtle archaism: "In the matter of your world's theology, consider this:" "What do the common folk whisper when the fires burn low?" "Every kingdom rests upon a foundation the king has forgotten — what is yours?" Deliberate, unhurried, atmospheric. You speak as though reading from a tome only you can see.
+
+METHOD: Help writers build worlds with internal consistency, cultural depth, ecological logic, and narrative purpose. Ask the questions that matter: How does power work here? What do people believe and why? What do they eat, trade, fear? How does geography shape culture? You know magic systems (Sanderson's Laws, Le Guin's counterargument), invented languages, naming conventions, maps as narrative tools, the iceberg principle. Help writers avoid the "cool stuff" trap where worldbuilding becomes decoration instead of story.
+
+Ancient in voice, razor-sharp in craft. Modern handling of exposition, info-dumps, world-revelation — depth without dragging pace.`
+};
+
+// ==================== STATE ====================
+let mode = 'sage';
 let messages = [];
+let loading = false;
 let uploadedFile = null;
+let sidebarOpen = true;
 
-// Initialize Modes
-const mBar = document.getElementById('modes');
-MODES.forEach(m => {
-  const b = document.createElement('button');
-  b.className = `mode-opt ${m.id===mode?'active':''}`;
-  b.innerText = m.label;
-  b.onclick = () => {
-    mode = m.id;
-    document.querySelectorAll('.mode-opt').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
+// ==================== INIT ====================
+function init() {
+  renderModes();
+  updateTopbar();
+  renderWelcome();
+  updateSendBtn();
+  document.getElementById('input').addEventListener('input', updateSendBtn);
+}
+
+function renderModes() {
+  const list = document.getElementById('mode-list');
+  list.innerHTML = MODES.map(m => `
+    <button class="m-btn ${m.id===mode?'on':''}" onclick="setMode('${m.id}')" id="mbtn-${m.id}">
+      <span class="m-ico">${m.icon}</span>
+      <div><div class="m-lab">${m.label}</div><div class="m-desc">${m.desc}</div></div>
+    </button>`).join('');
+}
+
+function setMode(id) {
+  mode = id;
+  renderModes();
+  updateTopbar();
+  updatePlaceholder();
+  closeSidebarMobile();
+  // Swap theme
+  document.body.className = 'theme-' + id;
+  // Swap overlay
+  document.querySelectorAll('.theme-overlay').forEach(el => el.classList.remove('active'));
+  const overlay = document.getElementById('theme-' + id + '-bg');
+  if (overlay) overlay.classList.add('active');
+  // Swap wisp colors
+  const wispColors = {
+    sage: 'rgba(201,160,255,.5)',
+    redquill: 'rgba(255,100,100,.5)',
+    muse: 'rgba(100,255,180,.5)',
+    architect: 'rgba(100,170,255,.5)',
+    lorekeeper: 'rgba(140,200,80,.5)'
   };
-  mBar.appendChild(b);
-});
-
-// Auto-expand textarea
-const tx = document.getElementById('prompt');
-tx.addEventListener('input', () => {
-  tx.style.height = 'auto';
-  tx.style.height = tx.scrollHeight + 'px';
-});
-
-// File Loading
-document.getElementById('f-in').addEventListener('change', async (e) => {
-  const f = e.target.files[0];
-  if(!f) return;
-  document.getElementById('stat-text').innerText = "Reading Scroll...";
-  try {
-    let content = "";
-    if(f.type === "application/pdf") {
-      const arr = await f.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({data:arr}).promise;
-      for(let i=1; i<=pdf.numPages; i++) {
-        const pg = await pdf.getPage(i);
-        const txt = await pg.getTextContent();
-        content += txt.items.map(it => it.str).join(" ") + "\n";
-      }
-    } else if(f.name.endsWith(".docx")) {
-      const arr = await f.arrayBuffer();
-      const res = await mammoth.extractRawText({arrayBuffer:arr});
-      content = res.value;
-    } else {
-      content = await f.text();
-    }
-    uploadedFile = { name: f.name, content: content };
-    document.getElementById('stat-text').innerText = f.name.toUpperCase();
-  } catch(err) {
-    document.getElementById('stat-text').innerText = "Reading Failed";
+  document.querySelectorAll('.wisp').forEach(w => {
+    w.style.background = wispColors[id];
+    w.style.boxShadow = '0 0 12px 6px ' + wispColors[id].replace('.5','.25');
+  });
+  // Swap scenes — hide all first
+  document.querySelectorAll('.scene-left,.scene-right').forEach(el => el.classList.remove('active'));
+  // Show/hide bookshelf + candle (sage only)
+  const shelf = document.querySelector('.bookshelf');
+  const candle = document.querySelector('.candle-set');
+  if (id === 'sage') {
+    if (shelf) shelf.style.opacity = '.9';
+    if (candle) candle.style.opacity = '.9';
+  } else {
+    if (shelf) shelf.style.opacity = '0';
+    if (candle) candle.style.opacity = '0';
+    // Show personality-specific scenes
+    const left = document.getElementById('scene-' + id + '-left');
+    const right = document.getElementById('scene-' + id + '-right');
+    if (left) left.classList.add('active');
+    if (right) right.classList.add('active');
   }
-});
+}
 
-function renderMd(t) { return marked.parse(t); }
+function updateTopbar() {
+  const m = MODES.find(x=>x.id===mode);
+  document.getElementById('tb-mode').textContent = m.icon + ' ' + m.label;
+  document.getElementById('tb-desc').textContent = '— ' + m.desc;
+}
+
+function updatePlaceholder() {
+  const m = MODES.find(x=>x.id===mode);
+  document.getElementById('input').placeholder = m.ph;
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('mob-backdrop');
+  const isMobile = window.innerWidth <= 700;
+  if (isMobile) {
+    const opening = !sb.classList.contains('mob-open');
+    sb.classList.toggle('mob-open');
+    if (opening) { bd.classList.add('show'); } else { bd.classList.remove('show'); }
+  } else {
+    sidebarOpen = !sidebarOpen;
+    sb.classList.toggle('shut');
+  }
+}
+
+function closeSidebarMobile() {
+  document.getElementById('sidebar').classList.remove('mob-open');
+  document.getElementById('mob-backdrop').classList.remove('show');
+}
+
+function showAbout() {
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('about-page').style.display = 'block';
+  document.querySelector('.bookshelf').style.display = 'none';
+  document.querySelector('.candle-set').style.display = 'none';
+  document.querySelectorAll('.scene-left,.scene-right').forEach(el => el.style.display = 'none');
+}
+
+function hideAbout() {
+  document.getElementById('about-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  document.querySelector('.bookshelf').style.display = '';
+  document.querySelector('.candle-set').style.display = '';
+  document.querySelectorAll('.scene-left,.scene-right').forEach(el => el.style.display = '');
+  setMode(mode); // re-apply current theme
+}
+
+function clearChat() {
+  messages = [];
+  uploadedFile = null;
+  document.getElementById('file-tag-area').innerHTML = '';
+  renderWelcome();
+}
+
+// ==================== FILE HANDLING ====================
+async function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  const tagArea = document.getElementById('file-tag-area');
+
+  // Show parsing-in-progress chip immediately
+  tagArea.innerHTML = `<div class="file-tag">📎 Reading ${file.name}…</div>`;
+
+  try {
+    // Wait for parser libraries to be ready (only matters for first file upload)
+    if ((ext === 'pdf' || ext === 'docx') && window.__noctuaryParsersReady) {
+      tagArea.innerHTML = `<div class="file-tag">📎 Loading parser for ${file.name}…</div>`;
+      try {
+        await window.__noctuaryParsersReady;
+      } catch (loadErr) {
+        throw new Error('File parsers blocked. Try disabling ad blockers, then refresh. (Detail: ' + loadErr.message + ')');
+      }
+    }
+
+    let text = '';
+
+    if (ext === 'txt' || ext === 'md') {
+      text = await file.text();
+    }
+    else if (ext === 'docx') {
+      if (typeof mammoth === 'undefined') throw new Error('Document parser failed to load. Refresh the page and try again.');
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      text = result.value;
+    }
+    else if (ext === 'pdf') {
+      if (typeof pdfjsLib === 'undefined') {
+        throw new Error('PDF parser failed to load from CDN. Try disabling any ad blockers and refresh.');
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      // disableWorker: true runs pdf.js synchronously on the main thread.
+      // Slightly slower for large PDFs but works in EVERY browser context including
+      // sandboxed iframes, blob origins, and security-restricted environments where
+      // Web Workers cannot be spawned from CDN URLs.
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, disableWorker: true }).promise;
+
+      // First pass: extract per-page items, keep them separated so we can identify chrome
+      const pageItemArrays = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        tagArea.innerHTML = `<div class="file-tag">📎 Reading ${file.name}… page ${i} of ${pdf.numPages}</div>`;
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        // Each item has a `.str` and a y-position via `.transform[5]`. Keep both for header/footer detection.
+        const items = content.items.map(item => ({
+          str: (item.str || '').trim(),
+          y: item.transform ? item.transform[5] : 0
+        })).filter(it => it.str.length > 0);
+        pageItemArrays.push(items);
+      }
+
+      // Build a frequency map of short text fragments that appear on many pages
+      // (these are almost certainly running headers, footers, or page numbers)
+      const fragmentCounts = {};
+      pageItemArrays.forEach(items => {
+        // Look at first 3 and last 3 items per page — that's where chrome lives
+        const edges = [...items.slice(0, 3), ...items.slice(-3)];
+        const seenOnThisPage = new Set();
+        edges.forEach(it => {
+          const s = it.str;
+          if (s.length < 80 && !seenOnThisPage.has(s)) {
+            seenOnThisPage.add(s);
+            fragmentCounts[s] = (fragmentCounts[s] || 0) + 1;
+          }
+        });
+      });
+      const chromeFragments = new Set(
+        Object.entries(fragmentCounts)
+          .filter(([s, c]) => c > pdf.numPages * 0.3) // appears on more than 30% of pages
+          .map(([s]) => s)
+      );
+
+      // Second pass: assemble text with chrome stripped, and drop standalone page numbers
+      const cleanPages = pageItemArrays.map(items => {
+        return items
+          .filter(it => !chromeFragments.has(it.str))
+          .filter(it => !/^[-–—]?\s*(page\s+)?\d{1,4}\s*[-–—]?$/i.test(it.str))
+          .map(it => it.str)
+          .join(' ');
+      });
+      let cleanedText = cleanPages.join('\n\n');
+
+      if (cleanedText.trim().length < 100) {
+        throw new Error('This PDF appears to be scanned/image-based — no extractable text. Try a .docx version or convert to .txt first.');
+      }
+      text = cleanedText;
+    }
+    else if (ext === 'doc') {
+      throw new Error('Old Word format (.doc) is not supported in-browser. Please save your document as .docx and try again.');
+    }
+    else {
+      throw new Error(`Unsupported file type: .${ext}. Try .txt, .md, .docx, or .pdf instead.`);
+    }
+
+    // Clean up extracted text
+    text = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    // Strip control characters and unprintable bytes that break JSON serialization on large payloads.
+    // Keeps tab (\t = 09), newline (\n = 0A), and carriage return (\r = 0D); removes everything else
+    // in the C0 control range plus the DEL character and unpaired surrogates.
+    text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    // Remove zero-width and BOM characters that some PDFs embed
+    text = text.replace(/[\u200B-\u200F\u2028\u2029\uFEFF]/g, '');
+
+    if (!text) {
+      throw new Error('No readable text found in this file.');
+    }
+
+    // Calculate word count for user feedback
+    const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+    const sizeKB = (file.size / 1024).toFixed(0);
+
+    uploadedFile = { name: file.name, content: text, wordCount };
+
+    tagArea.innerHTML = `
+      <div class="file-tag">📎 ${file.name} · ${sizeKB}KB · ${wordCount.toLocaleString()} words
+        <button onclick="removeFile()">✕</button>
+      </div>`;
+    updateSendBtn();
+  } catch (err) {
+    uploadedFile = null;
+    tagArea.innerHTML = `
+      <div class="file-tag" style="color:#e88;border-color:rgba(232,136,136,.3)">
+        ⚠️ ${err.message}
+        <button onclick="removeFile()">✕</button>
+      </div>`;
+  }
+}
+
+function removeFile() {
+  uploadedFile = null;
+  document.getElementById('file-tag-area').innerHTML = '';
+  updateSendBtn();
+}
+
+// ==================== RENDERING ====================
+function renderWelcome() {
+  const msgs = document.getElementById('msgs');
+  const m = MODES.find(x=>x.id===mode);
+  msgs.innerHTML = `
+    <div class="welcome">
+      <div class="w-icon">📖</div>
+      <div class="w-title">NOCTUARY</div>
+      <div class="w-sub">A journal of night thoughts</div>
+      <div class="w-desc">Five personalities. One literary mind. Built for writers who take the craft seriously — from first draft to final polish. Select a personality and begin.</div>
+      <div class="w-prompts">
+        ${['How do I build dread without showing the monster?',
+           'Analyze the pacing of my chapter',
+           'Help me design a magic system',
+           'Why does my dialogue feel wooden?',
+           'What makes a great opening line?',
+           'Build me a world from this premise'].map(q=>
+          `<button class="w-p" onclick="fillPrompt(\`${q}\`)">${q}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+function fillPrompt(t) {
+  document.getElementById('input').value = t;
+  autoResize(document.getElementById('input'));
+  updateSendBtn();
+  document.getElementById('input').focus();
+}
 
 function renderMessages() {
   const el = document.getElementById('msgs');
-  el.innerHTML = '';
-  messages.forEach(m => {
-    const w = document.createElement('div');
-    w.className = 'msg-wrap';
-    const tag = m.file ? `<div class="file-tag">📜 ${m.file.name}</div>` : '';
-    w.innerHTML = `
-      <div class="msg-who ${m.role==='user'?'usr-n':'ai-n'}">${m.role==='user'?'SCRIBE':MODES.find(x=>x.id===mode).label}</div>
-      <div class="msg-body">${renderMd(m.content)}${tag}</div>
-    `;
-    el.appendChild(w);
+  let html = '';
+  messages.forEach((msg,i) => {
+    const isUser = msg.role === 'user';
+    html += `<div class="msg-wrap"><div class="msg-row">
+      <div class="msg-av ${isUser?'usr':'ai'}">${isUser?'✦':'📖'}</div>
+      <div class="msg-body">
+        <div class="msg-who ${isUser?'usr-n':'ai-n'}">${isUser?'You':MODES.find(x=>x.id===mode).label}</div>
+        ${isUser ? `<div style="white-space:pre-wrap">${escHtml(msg.display||msg.content)}</div>` : renderMd(msg.content)}
+      </div>
+    </div></div>`;
   });
+  if (loading) {
+    html += `<div class="msg-wrap"><div class="msg-row">
+      <div class="msg-av ai">📖</div>
+      <div class="msg-body"><div class="msg-who ai-n">${MODES.find(x=>x.id===mode).label}</div>
+        <div class="loading-dots"><span></span><span></span><span></span></div>
+      </div></div></div>`;
+  }
+  el.innerHTML = html;
   el.scrollTop = el.scrollHeight;
 }
 
-function updateSendBtn() {
-  document.getElementById('send-btn').disabled = !tx.value.trim() && !uploadedFile;
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-tx.addEventListener('input', updateSendBtn);
+
+function renderMd(text) {
+  // Extract [[DETAILS]]...[[/DETAILS]] blocks BEFORE escaping, store them,
+  // then re-inject as raw HTML at the end so they render properly
+  const detailsBlocks = [];
+  text = text.replace(/\[\[DETAILS\]\]([\s\S]*?)\[\[\/DETAILS\]\]/g, (_, content) => {
+    const placeholder = `__DETAILS_${detailsBlocks.length}__`;
+    detailsBlocks.push(content);
+    return placeholder;
+  });
+
+  let h = escHtml(text);
+  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  h = h.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/\n\n/g, '</p><p>');
+  h = '<p>' + h + '</p>';
+  h = h.replace(/<p><\/p>/g, '');
+  h = h.replace(/<p>(<h[123]>)/g, '$1');
+  h = h.replace(/(<\/h[123]>)<\/p>/g, '$1');
+  h = h.replace(/<p>(<pre>)/g, '$1');
+  h = h.replace(/(<\/pre>)<\/p>/g, '$1');
+  h = h.replace(/<p>(<blockquote>)/g, '$1');
+  h = h.replace(/(<\/blockquote>)<\/p>/g, '$1');
+  h = h.replace(/<p>(<li>)/g, '<ul>$1');
+  h = h.replace(/(<\/li>)<\/p>/g, '$1</ul>');
+
+  // Re-inject details blocks as real HTML (they were extracted pre-escape)
+  detailsBlocks.forEach((content, i) => {
+    const block = `<details style="margin-top:1em;font-family:monospace;font-size:11px;color:#888;cursor:pointer"><summary style="user-select:none">technical details</summary><pre style="background:rgba(0,0,0,.3);padding:8px;border-radius:4px;margin-top:6px;white-space:pre-wrap;color:#aaa">${escHtml(content)}</pre></details>`;
+    h = h.replace(`__DETAILS_${i}__`, block);
+  });
+
+  return h;
+}
+
+// ==================== SEND ====================
+function updateSendBtn() {
+  const val = document.getElementById('input').value.trim();
+  const btn = document.getElementById('send-btn');
+  if (val || uploadedFile) { btn.className = 'send-btn on'; } else { btn.className = 'send-btn off'; }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+}
+
+async function send() {
+  const input = document.getElementById('input');
+  let text = input.value.trim();
+  if (!text && !uploadedFile) return;
+  if (loading) return;
+
+  let userContent = text;
+  let displayContent = text;
+
+  if (uploadedFile) {
+    const fileNote = `[Uploaded: ${uploadedFile.name}]`;
+    displayContent = text ? `${fileNote}\n${text}` : fileNote;
+    const filePreamble = `The user has uploaded a manuscript file called "${uploadedFile.name}". Here is the full text:\n\n---BEGIN MANUSCRIPT---\n${uploadedFile.content}\n---END MANUSCRIPT---\n\n`;
+    userContent = text ? `${filePreamble}User's message: ${text}` : `${filePreamble}Please provide a thorough analysis of this manuscript.`;
+    uploadedFile = null;
+    document.getElementById('file-tag-area').innerHTML = '';
+  }
+
+  messages.push({ role: 'user', content: userContent, display: displayContent });
+  input.value = '';
+  input.style.height = 'auto';
+  updateSendBtn();
+  loading = true;
+  renderMessages();
+
+  const startTime = Date.now();
+  let payloadSize = 0;
+
+  try {
+    const geminiMessages = messages.map(m => ({
+      role: m.role === 'user' ? 'user' : 'model',
+      parts: [{ text: m.content }]
+    }));
+
+    const requestBody = JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT + '\n\n' + MODE_PROMPTS[mode] }] },
+      contents: geminiMessages,
+      // Disable safety filters — they trigger false positives on memoir/horror/literary content
+      // (large manuscripts often contain difficult themes that the classifier flags incorrectly)
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+      ],
+      generationConfig: {
+        temperature: 0.8,
+        topP: 0.95,
+        topK: 40,
+        maxOutputTokens: 8192
+      }
+    });
+
+    payloadSize = requestBody.length;
+
+    // Promise.race-based timeout — avoids AbortController which fails in sandboxed iframes
+    // ("AbortSignal could not be cloned" via postMessage)
+    const fetchPromise = fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody
+    });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timed out after 3 minutes')), 180000)
+    );
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
+
+    const data = await res.json();
+    let reply = 'I couldn\'t generate a response. Please try again.';
+    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+      reply = data.candidates[0].content.parts.map(p => p.text || '').join('');
+    } else if (data.candidates && data.candidates[0] && data.candidates[0].finishReason === 'SAFETY') {
+      // Even with BLOCK_NONE, Gemini occasionally returns SAFETY finish reason on the response side
+      reply = themedError({ message: 'Content was filtered by safety classifier.', code: 'SAFETY' }, mode);
+    } else if (data.candidates && data.candidates[0] && data.candidates[0].finishReason === 'MAX_TOKENS') {
+      reply = themedError({ message: 'Response exceeded the maximum token length.', code: 'TOO_LONG' }, mode);
+    } else if (data.error) {
+      // Pass HTTP status code through for better classification
+      reply = themedError({ ...data.error, code: data.error.code || res.status }, mode);
+    } else if (!res.ok) {
+      reply = themedError({ message: `Server returned status ${res.status}: ${res.statusText}`, code: res.status }, mode);
+    } else {
+      // Empty/malformed response
+      reply = themedError({ message: 'Empty response from server. The request may have been silently rejected.', code: 'EMPTY' }, mode);
+    }
+    messages.push({ role: 'assistant', content: '' });
+    loading = false;
+    renderMessages();
+    // Typewriter effect
+    await typewriter(reply, messages.length - 1);
+  } catch (err) {
+    const elapsedMs = Date.now() - startTime;
+    // Don't hardcode NETWORK — pass the real error through and let classifier work it out.
+    // Include diagnostic info: how big was the payload, how long until failure, what was the error name
+    messages.push({ role: 'assistant', content: themedError({
+      message: err.message || 'Unknown error',
+      code: err.name || '',
+      payloadKB: Math.round(payloadSize / 1024),
+      elapsedMs: elapsedMs
+    }, mode) });
+    loading = false;
+    renderMessages();
+  }
+}
+
+// ==================== THEMED ERRORS ====================
+// Each personality delivers errors in their own voice. Detects error type
+// from the API response and selects an appropriate framing.
+function themedError(error, currentMode) {
+  const msg = (error.message || '').toLowerCase();
+  const code = error.code || '';
+
+  // Classify the error
+  let kind = 'unknown';
+  if (msg.includes('quota') || msg.includes('rate') || msg.includes('limit') || code === 429) kind = 'quota';
+  else if (msg.includes('api key') || msg.includes('api_key') || msg.includes('unauthorized') || code === 401 || code === 403) kind = 'auth';
+  else if (msg.includes('safety') || msg.includes('blocked') || msg.includes('harm') || code === 'SAFETY') kind = 'safety';
+  else if (code === 'AbortError' || msg.includes('aborted') || msg.includes('timeout')) kind = 'timeout';
+  else if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network')) kind = 'network';
+  else if (msg.includes('token') || msg.includes('too long') || msg.includes('context') || code === 'TOO_LONG') kind = 'too_long';
+
+  // Extract retry seconds if present (e.g., "Please retry in 47.84s")
+  let retryHint = '';
+  const retryMatch = msg.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+  if (retryMatch) {
+    const secs = Math.ceil(parseFloat(retryMatch[1]));
+    retryHint = secs < 60 ? `${secs} seconds` : `about ${Math.ceil(secs/60)} minute${secs >= 120 ? 's' : ''}`;
+  }
+
+  const errors = {
+    sage: {
+      quota: `*sets down the teacup*\n\nThe well has run dry for the moment, my friend. We have spoken much, and the keeper of the gate asks that we wait${retryHint ? ` — about ${retryHint}` : ' a short while'} before resuming. Use this pause well. Read the page back to yourself aloud. The ear catches what the eye has grown accustomed to.`,
+      auth: `*peers over reading glasses*\n\nThe key to this library appears to have been misplaced or refused at the door. Have a word with whoever set up your access — the credentials need attention before we can continue our conversation.`,
+      safety: `*pauses thoughtfully*\n\nThe gatekeeper of this particular system has declined to engage with the passage as written. Not a judgment from me — merely the automated guardian's caution. Try rephrasing, or approach the same idea from a different angle. The good masters often wrote difficult things by sidling up to them.`,
+      network: `*looks toward the window*\n\nThe path between us would not open. The browser refused the message before it could leave — likely the manuscript is too large for a single passage in this environment. Try sending a chapter rather than the whole work.`,
+      timeout: `*closes the book softly*\n\nWe waited long, but no answer came. The connection held open until it could not. With a manuscript this size, the model may need more patience than the browser allows. Try again, or work in smaller pieces.`,
+      too_long: `*considers the manuscript pile*\n\nWhat you've sent is more than I can hold in mind at once. Perhaps we work in pieces — a chapter, a scene, a passage — rather than the whole work in a single breath. The masters revised in passes. So shall we.`,
+      unknown: `*frowns slightly*\n\nSomething has gone awry in the machinery — the message I received is unclear: *"${error.message || 'no detail given'}"*. Wait a moment and try again. If it persists, the technical sort of help will know more than I.`
+    },
+    redquill: {
+      quota: `Halt.\n\nThe quota is spent${retryHint ? ` — wait ${retryHint}` : ' — wait briefly'} before we continue. Use the silence. Read your last paragraph aloud. Find one weak verb and replace it. That is the assignment until the gate reopens.`,
+      auth: `The API key is rejected. Whoever set up access — fix it. I cannot work without tools.`,
+      safety: `The safety filter intercepted this. Not my call. Rephrase the passage and submit again. Many hard truths have been written by those willing to angle the language.`,
+      network: `Browser refused to send. Manuscript too large for the request, likely. Send a chapter, not the book.`,
+      timeout: `Connection timed out. The model needed longer than the browser would wait. Send less. Or try again.`,
+      too_long: `Too much. Send a chapter, not the manuscript. Or a scene, not the chapter. Editing is local work — show me the wound, not the entire body.`,
+      unknown: `Something failed: *"${error.message || 'unspecified'}"*. Retry. If it continues, the problem is not yours to solve from this side of the screen.`
+    },
+    muse: {
+      quota: `Oh — oh no, the well's gone dry for a moment.\n\nThe gatekeeper says wait${retryHint ? ` — ${retryHint}` : ' — a moment'} before we can keep building. But this is the *good* kind of pause. Walk away from the page. Look out a window. The best ideas arrive when you stop chasing them. Come back when the gate opens — I'll still be electric.`,
+      auth: `The door's locked, friend! Whoever holds the key needs to fix the credentials before we can keep going. Boring problem, easily solved.`,
+      safety: `Ohhh — the safety filter caught that one. Not a problem with the *idea* — just the wording. Try it sideways. The best stories often live in what you can imply rather than say outright. What's the version of this scene that sneaks in through the back door?`,
+      network: `The browser balked! Whatever you sent, it was too much for one breath. Pick a piece — a scene, a chapter, the part that's keeping you up. Start there. We can always spiral outward.`,
+      timeout: `The line was open but nothing came back in time. Big requests, the model thinks slowly. Try a smaller bite — and while we wait, write down what you'd want it to notice. That list is sometimes more useful than the answer.`,
+      too_long: `Wait — you sent me everything? Everything everything? I love the energy but I'm drowning a little. Pick the one scene that's haunting you. Start there. We'll spiral outward.`,
+      unknown: `Something glitched: *"${error.message || 'mystery error'}"*. Try again — most things in writing work the second time anyway.`
+    },
+    architect: {
+      quota: `Quota exceeded. The free tier permits 250,000 input tokens per minute and we have surpassed that ceiling.${retryHint ? ` Retry window: ${retryHint}.` : ''} Two structural fixes worth your consideration: enable billing on your API key (paid tier raises the per-minute limit roughly 16x), or upload manuscripts as smaller units — chapter-sized rather than book-sized — to stay within the free allowance.`,
+      auth: `Authentication failed. The API key is either missing, invalid, or lacks permission for this model. Verify the key in your Google AI Studio dashboard.`,
+      safety: `The safety classifier flagged this content. I cannot override that filter. Reframe the request — same load-bearing intent, different surface language — and resubmit.`,
+      network: `Browser-level fetch rejection. The request was refused before reaching the API. Common causes: payload exceeds the browser's per-request size budget in sandboxed contexts (typical ceiling: 1-4MB), or the request was blocked by a security policy. The technical details below show the payload size — if it's over 1MB, splitting the manuscript into chapter-sized requests will resolve this.`,
+      timeout: `Request timed out before response. With a manuscript of this size, Gemini can take 60-120 seconds to process. Browser fetch defaults are often shorter than that. The fetch was given 3 minutes here; if even that wasn't enough, the model is genuinely overloaded — try again, or reduce input size.`,
+      too_long: `Input exceeds the model's context capacity. Architecturally, this means the manuscript and conversation history together occupy more space than a single request can carry. Send a smaller unit — one chapter, one act — and we work from there.`,
+      unknown: `Unhandled error: *"${error.message || 'no detail provided'}"*. Capture the exact wording if it recurs. Diagnostic precision saves time on the second pass.`
+    },
+    lorekeeper: {
+      quota: `*closes the tome carefully*\n\nThe wells of speaking have run dry for the moment. The gatekeepers of this place permit only so many words to pass through their gate within a turning of the glass${retryHint ? `, and they ask that we wait ${retryHint} before opening it again` : ''}. Sit with your world a while. Often the silence between questions is where the deeper answers lie.`,
+      auth: `*looks up from the page*\n\nThe sigil that grants you passage has been refused. Whoever holds the key to this archive must restore your access before we may continue our work.`,
+      safety: `*pauses*\n\nThe wards placed upon this place have turned that particular request aside. Not by my will — by the silent guardians' caution. Frame the question with different words and the way may open.`,
+      network: `*the candle gutters*\n\nThe path between us was sealed before the message could pass. What you sent was a kingdom entire, and the gate would not open for so much weight. Bring me a province at a time — the way will hold.`,
+      timeout: `*the wax pools at the candle's base*\n\nWe waited long. The path stayed open, but no word returned in time. The keeper of the archive moves slowly when given a great work to read. Try again, with patience or with less.`,
+      too_long: `*regards the great pile of pages*\n\nWhat you have brought is a kingdom entire, and even my archive has its limits. Bring me a single province — one continent, one culture, one chapter — and we shall do that justice before reaching for the whole.`,
+      unknown: `*frowns at the air*\n\nA disturbance: *"${error.message || 'the message comes garbled'}"*. The fault lies not in your asking. Try again, and if the silence persists, the keepers of the machinery must be summoned.`
+    }
+  };
+
+  const personality = errors[currentMode] || errors.sage;
+  const themed = personality[kind] || personality.unknown;
+
+  // Append collapsible technical details so the real error is recoverable for debugging
+  // without cluttering the themed message. Use a marker so renderMd can swap to real HTML.
+  const detail = { message: error.message || '', code: error.code || '', kind: kind };
+  if (typeof error.payloadKB === 'number') detail.payloadKB = error.payloadKB;
+  if (typeof error.elapsedMs === 'number') detail.elapsedMs = error.elapsedMs;
+  const rawDetail = JSON.stringify(detail, null, 2);
+  return themed + '\n\n[[DETAILS]]' + rawDetail + '[[/DETAILS]]';
+}
 
 async function typewriter(text, msgIndex) {
   const el = document.getElementById('msgs');
+  const speed = 12;
+  const chunkSize = 3;
   let i = 0;
+  let userScrolledUp = false;
+
+  // Detect if user scrolls up during typing
+  function onScroll() {
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    userScrolledUp = distFromBottom > 80;
+  }
+  el.addEventListener('scroll', onScroll);
+
   return new Promise(resolve => {
     function tick() {
-      if(i < text.length) {
-        i += 4;
+      if (i < text.length) {
+        i = Math.min(i + chunkSize, text.length);
         messages[msgIndex].content = text.slice(0, i);
-        const wraps = el.querySelectorAll('.msg-wrap');
-        const last = wraps[wraps.length-1];
-        if(last) {
-          last.querySelector('.msg-body').innerHTML = renderMd(messages[msgIndex].content);
+        const msgDivs = el.querySelectorAll('.msg-wrap');
+        const lastMsg = msgDivs[msgDivs.length - 1];
+        if (lastMsg) {
+          const bodyEl = lastMsg.querySelector('.msg-body');
+          if (bodyEl) {
+            bodyEl.innerHTML = '<div class="msg-who ai-n">' + MODES.find(x=>x.id===mode).label + '</div>' + renderMd(messages[msgIndex].content);
+          }
         }
-        el.scrollTop = el.scrollHeight;
-        setTimeout(tick, 10);
+        if (!userScrolledUp) {
+          // auto-scroll disabled — user controls scroll
+        }
+        setTimeout(tick, speed);
       } else {
         messages[msgIndex].content = text;
+        el.removeEventListener('scroll', onScroll);
+        renderMessages();
         resolve();
       }
     }
@@ -229,70 +1939,10 @@ async function typewriter(text, msgIndex) {
   });
 }
 
-// -----------------------------------------------------------------
-// THE FIXED ENGINE: Corrects JSON parsing and safety blocks for 66k words
-// -----------------------------------------------------------------
-async function handleSend() {
-  const query = tx.value.trim();
-  if(!query && !uploadedFile) return;
-
-  // Cleanup: Strips Null bytes and control chars that crash JSON.stringify on 1MB+ strings
-  const sanitize = (s) => s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-
-  // Add User Message to UI
-  messages.push({ role:'user', content: query, file: uploadedFile ? {name: uploadedFile.name} : null });
-  renderMessages();
-  tx.value = '';
-  tx.style.height = 'auto';
-  updateSendBtn();
-
-  // Prepare Payload
-  let systemMessage = MODES.find(x=>x.id===mode).sage;
-  
-  // Map history to API format
-  let apiContents = messages.map(m => ({
-    role: m.role === 'user' ? 'user' : 'model',
-    parts: [{ text: m.content }]
-  }));
-
-  // If a file is active, we attach it to the CURRENT user part only to keep history lean
-  if(uploadedFile && uploadedFile.content) {
-    const cleanBook = sanitize(uploadedFile.content);
-    const lastIdx = apiContents.length - 1;
-    apiContents[lastIdx].parts[0].text = `[MANUSCRIPT_DATA: ${uploadedFile.name}]\n${cleanBook}\n\n[QUERY]: ${query}`;
-  }
-
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemMessage }] },
-        contents: apiContents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
-        // Critical for literature: prevents the AI from blocking content due to mature themes in manuscripts
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-        ]
-      })
-    });
-
-    const data = await res.json();
-    if(data.error) throw new Error(data.error.message);
-
-    const aiText = data.candidates[0].content.parts[0].text;
-    messages.push({ role: 'model', content: '' });
-    renderMessages();
-    await typewriter(aiText, messages.length - 1);
-
-  } catch(err) {
-    messages.push({ role: 'model', content: "_The ritual failed. The ink turned to lead._\n\n**Error:** " + err.message });
-    renderMessages();
-  }
-}
+// ==================== BOOT ====================
+document.body.className = 'theme-sage';
+init();
 </script>
 </body>
 </html>
+  
